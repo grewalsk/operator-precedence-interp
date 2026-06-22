@@ -7,22 +7,47 @@ import os, sys, subprocess
 
 # ----------------------------------------------------------------------------
 # 1) Dependency: transformer_lens (Colab has torch/transformers, not this).
+#
+#    GOTCHA this guards against: installing transformer_lens can shift `torch`,
+#    which breaks Colab's PREBUILT torchaudio/torchvision (their compiled .so is
+#    ABI-locked to the original torch) -> on import you get
+#        OSError: .../_torchaudio.abi3.so: undefined symbol: torch_library_impl
+#    We use neither audio nor vision, so we (a) remove them to sidestep the ABI
+#    clash entirely, and (b) PIN torch to Colab's version so nothing else shifts.
 # ----------------------------------------------------------------------------
-def _pip_install(*pkgs):
-    subprocess.run([sys.executable, "-m", "pip", "install", "-q", *pkgs], check=False)
+def _pip(*args):
+    subprocess.run([sys.executable, "-m", "pip", *args], check=False)
+
+def _import_tl():
+    # fresh import attempt, clearing any half-loaded modules from a prior failure
+    for _m in [k for k in list(sys.modules)
+               if k.split(".")[0] in ("transformer_lens", "torchaudio", "torchvision")]:
+        del sys.modules[_m]
+    import transformer_lens  # noqa: F401
 
 try:
     import transformer_lens  # noqa: F401
     print("transformer_lens already installed.")
-except ModuleNotFoundError:
+except Exception:
     print("Installing transformer_lens (one-time per session)...")
-    _pip_install("transformer_lens")
+    # Remove the unused, ABI-fragile audio/vision libs so a torch shift can't break import.
+    _pip("uninstall", "-q", "-y", "torchaudio", "torchvision")
+    # Pin torch to whatever Colab already has, so the install doesn't move it.
+    _torch_pin = []
     try:
-        import transformer_lens  # noqa: F401
-        print("transformer_lens installed OK.")
-    except ModuleNotFoundError:
-        print("!! transformer_lens still not importable. Do: Runtime > Restart session, "
-              "then re-run this cell. (A transformers upgrade can require one restart.)")
+        import torch
+        _torch_pin = [f"torch=={torch.__version__.split('+')[0]}"]
+    except Exception:
+        pass
+    _pip("install", "-q", "transformer_lens", *_torch_pin)
+    try:
+        _import_tl()
+        print("transformer_lens installed and imported OK.")
+    except Exception as e:
+        print("!! transformer_lens import still failing:", repr(e))
+        print("   CLEANEST FIX: Runtime > Disconnect and delete runtime, reopen the notebook,")
+        print("   then Run all. (Your current runtime is in a half-changed state; a pristine")
+        print("   one installs cleanly.)")
 
 # ----------------------------------------------------------------------------
 # 2) (Recommended on Colab) cache the 16 GB weights on Drive so you don't
