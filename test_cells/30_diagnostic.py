@@ -5,7 +5,7 @@ print("=== token-length parity on the two forms (REAL Llama tokenizer) ===")
 all_ok = True
 for B, C in [(3, 5), (12, 7), (12, 34), (123, 45), (7, 88)]:
     L = f"( 0 + {B} ) * {C} ="
-    R = f"0 + ( {B} * {C} ) ="
+    R = f"( 0 + {B} * {C} ) ="
     il = tokenizer(L, add_special_tokens=True)["input_ids"]
     ir = tokenizer(R, add_special_tokens=True)["input_ids"]
     ok = (len(il) == len(ir))

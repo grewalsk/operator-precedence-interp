@@ -8,10 +8,11 @@
 # guarded by has_artifact('phase2_stimuli','json').
 #
 # DESIGN (spec-faithful, parenthesized additive-identity contrast):
-#   Factor A (Depth):   depth_left  = "( 0 + B ) * C ="   -> (0+B)*C = B*C
-#                       depth_right = "0 + ( B * C ) ="   -> 0+(B*C) = B*C
-#     Same token multiset {(, ), 0, +, *, =, B, C}; both evaluate to B*C;
-#     parentheses present in BOTH; only the paren BOUNDARY moves. Additive
+#   Factor A (Depth):   depth_left  = "( 0 + B ) * C ="   -> (0+B)*C = B*C  ('*' depth 0)
+#                       depth_right = "( 0 + B * C ) ="   -> 0+(B*C) = B*C  ('*' depth 1)
+#     Same token multiset {(, ), 0, +, *, =, B, C}; both evaluate to B*C; both share the
+#     "( 0 + B" prefix so they TOKENIZE TO EQUAL LENGTH on real Llama (the ')' and '*'
+#     positions move). Parentheses present in BOTH; only the paren BOUNDARY moves. Additive
 #     identity (0+) -- NEVER multiply-by-one, which the model may compile to a
 #     no-op -- so the multiplication operands B,C stay genuinely engaged.
 #   Factor B (Distance, the lead result): SUFFIX padding " + 0" * k inserted
@@ -104,8 +105,12 @@ def _segments(template, B, C, pad_len=0, D=None):
     if template == "depth_left":          # ( 0 + B ) * C
         segs = [("(", "lparen"), ("0", "op0"), ("+", "plus"), (B, "B"),
                 (")", "rparen"), ("*", "star"), (C, "C")]
-    elif template == "depth_right":       # 0 + ( B * C )
-        segs = [("0", "op0"), ("+", "plus"), ("(", "lparen"), (B, "B"),
+    elif template == "depth_right":       # ( 0 + B * C )  == 0 + (B*C) by precedence
+        # Anchored to the SAME "( 0 + B" prefix as depth_left so the two forms tokenize to
+        # equal length on real Llama (a leading "(" tokenizes to 2 tokens but an embedded
+        # one to 1, so "0 + ( B * C )" was always 1 token shorter). Same token multiset
+        # {(,0,+,B,*,C,)}; only the ")" and "*" positions move.
+        segs = [("(", "lparen"), ("0", "op0"), ("+", "plus"), (B, "B"),
                 ("*", "star"), (C, "C"), (")", "rparen")]
     elif template == "depth2":            # ( 0 + ( 0 + B ) * C ) * D  = B*C*D
         D = str(int(D))

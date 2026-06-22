@@ -93,8 +93,8 @@ log(f"G3 operating on {len(STIM)} canonical Phase 2 stimuli (source='{src_name}'
 # ----------------------------------------------------------------------------------------
 def _render_canonical(B, C, condition="depth_left"):
     B, C = int(B), int(C)
-    if condition == "depth_left":   return f"( 0 + {B} ) * {C} ="   # (0+B)*C = B*C  (additive identity)
-    if condition == "depth_right":  return f"0 + ( {B} * {C} ) ="   # 0+(B*C) = B*C
+    if condition == "depth_left":   return f"( 0 + {B} ) * {C} ="   # (0+B)*C = B*C  ('*' depth 0)
+    if condition == "depth_right":  return f"( 0 + {B} * {C} ) ="   # 0+(B*C) = B*C  ('*' depth 1)
     if condition == "bare":         return f"{B} * {C} ="           # bare-mult control (no identity)
     raise ValueError(f"unknown condition {condition!r}")
 

@@ -55,7 +55,9 @@ def _render(template, pad_len=0, B=None, C=None):
     if template == "depth_left":
         toks = ["(", "0", "+", B, ")", "*", C]
     elif template == "depth_right":
-        toks = ["0", "+", "(", B, "*", C, ")"]
+        # ( 0 + B * C ) -- anchored to the same "( 0 + B" prefix as depth_left so the two
+        # tokenize to equal length on real Llama (must match Phase 2's _segments exactly).
+        toks = ["(", "0", "+", B, "*", C, ")"]
     else:
         raise ValueError(f"unknown template {template!r}")
     for _ in range(int(pad_len)):
@@ -221,18 +223,15 @@ def _test_token_map():
         ck(f"answer_cue shift == pad_unit_len*k (k={k})",
            m["answer_cue"] - base["answer_cue"], _MAP["pad_unit_len"] * k)
 
-    # (4) Absolute hand-verified anchor for bos_offset==1, single-token operands:
-    #     depth_right: BOS 0 + ( 3 * 5 ) =  -> op0=1,B=4,*=5,C=6,eq=8
-    if _MAP["bos_offset"] == 1:
-        m = token_map("depth_right", "right", 0)
-        ck("abs.role_flip", m["role_flip"], 1)
-        ck("abs.probed_operand", m["probed_operand"], 4)
-        ck("abs.critical_operator", m["critical_operator"], 5)
-        ck("abs.intermediate_decodable", m["intermediate_decodable"], 6)
-        ck("abs.answer_cue", m["answer_cue"], 8)
-    else:
-        print(f"  [INFO] bos_offset={_MAP['bos_offset']} != 1; absolute anchor skipped "
-              f"(content-anchored ref above still enforces correctness).")
+    # (4) Tokenizer-agnostic ORDERING invariant. (Absolute indices are NOT hardcoded:
+    #     real Llama emits standalone bare-space tokens, so literal positions depend on the
+    #     tokenizer. The content-anchored ref in (1) already pins exact indices; here we just
+    #     assert the structural order, which holds on any tokenizer.)
+    m = token_map("depth_right", "right", 0)
+    ck("order op0<B",   m["role_flip"]          < m["probed_operand"],        True)
+    ck("order B<*",     m["probed_operand"]      < m["critical_operator"],     True)
+    ck("order *<C",     m["critical_operator"]   < m["intermediate_decodable"], True)
+    ck("order C<eq",    m["intermediate_decodable"] < m["answer_cue"],         True)
 
     # (5) token_map_for_record agrees with Phase 2 records (if dataset present).
     if has_artifact("phase2_stimuli", "json"):

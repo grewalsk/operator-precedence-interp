@@ -20,7 +20,7 @@ Token‑identical, additive‑identity (never `×1`), parentheses in both — on
 
 ```
 depth_left  :  ( 0 + B ) * C =      # (0+B)*C = B*C ,  '*' at paren-depth 0
-depth_right :  0 + ( B * C ) =      # 0+(B*C) = B*C ,  '*' at paren-depth 1
+depth_right :  ( 0 + B * C ) =      # 0+(B*C) = B*C ,  '*' at paren-depth 1
 ```
 
 Within a pair, token‑length parity and B's token index are **hard assertions**; C's structural shift is recorded. Factor B stretches length with suffix `+ 0` padding (answer + depth preserved); Factor C is a depth‑2 nesting `(0+(0+B)*C)*D = B·C·D`.
