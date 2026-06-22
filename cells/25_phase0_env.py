@@ -392,19 +392,27 @@ def _g0_smoke():
         results["4_attn_pattern"] = False
         print(f"[G0.4] FAIL ({type(e).__name__}: {e})")
 
-    # --- Check 5: greedy next-token decodes to a plausible digit ---
+    # --- Check 5: greedy CONTINUATION contains a plausible digit ---
+    # Llama emits a LEADING SPACE token before the answer digit, so the single next token
+    # after "12 + 7 =" is often whitespace, not a digit (this exact gotcha tripped Phase 5
+    # too). Decode a few tokens greedily and check the short continuation has a digit --
+    # robust to the space-then-digit split.
     try:
-        if logits is None:
-            with torch.no_grad():
-                logits = model(tokens)
-        next_id = int(logits[0, -1].argmax().item())
-        next_tok = tokenizer.decode([next_id])
-        stripped = next_tok.strip()
-        ok5 = any(ch.isdigit() for ch in stripped) and len(stripped) > 0
+        _cur = tokens
+        _gen = ""
+        with torch.no_grad():
+            for _ in range(3):
+                _lg = model(_cur)
+                _nid = int(_lg[0, -1].argmax().item())
+                _gen += tokenizer.decode([_nid])
+                _cur = torch.cat(
+                    [_cur, torch.tensor([[_nid]], device=_cur.device, dtype=_cur.dtype)], dim=1)
+                if any(ch.isdigit() for ch in _gen):
+                    break
+        ok5 = any(ch.isdigit() for ch in _gen)
         results["5_greedy_digit"] = ok5
-        print(f"[G0.5] greedy next-token after {PROMPT!r}: "
-              f"id={next_id} tok={next_tok!r} -> {'PASS' if ok5 else 'FAIL'} "
-              f"(plausible digit; note correct answer is 19)")
+        print(f"[G0.5] greedy continuation after {PROMPT!r}: {_gen!r} -> "
+              f"{'PASS' if ok5 else 'FAIL'} (digit appears; leading space is expected on Llama)")
     except Exception as e:
         results["5_greedy_digit"] = False
         print(f"[G0.5] FAIL ({type(e).__name__}: {e})")
