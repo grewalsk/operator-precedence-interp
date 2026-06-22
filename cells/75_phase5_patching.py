@@ -50,44 +50,55 @@ if "set_gate" not in globals():
         return gates[str(name)]
 
 # --------------------------------------------------------------------------------
-# 1) Clean / corrupted prompt pair with KNOWN, single-token, DIFFERING answers.
-#    NO trailing space: the final token is "is", and the model predicts " 7"/" 8".
+# 1) Clean / corrupted prompt pair with KNOWN, DIFFERING answers.
 #    "The sum of 3 and 4 is" -> " 7"  (clean)
 #    "The sum of 3 and 5 is" -> " 8"  (corrupted; only the second operand changes)
-#    Token-length matched so positions line up 1:1 for patching.
+#    Token-length matched so positions line up 1:1 for patching. Answers need NOT be single
+#    tokens: Llama emits " 7" as [space, "7"], so we append the shared leading space below
+#    and score the divergent digit (handled in the next block).
 CLEAN_PROMPT     = "The sum of 3 and 4 is"
 CORRUPTED_PROMPT = "The sum of 3 and 5 is"
 CLEAN_ANSWER     = "7"   # answer for the CLEAN prompt
 CORRUPTED_ANSWER = "8"   # answer for the CORRUPTED prompt
 
-def _single_token_id(s):
-    # Answer tokens in arithmetic prompts are emitted with a leading space.
-    ids = tokenizer(" " + s, add_special_tokens=False)["input_ids"]
-    assert len(ids) == 1, f"answer {s!r} is not a single token: {ids}"
-    return ids[0]
+# Llama tokenizes answers as [leading-space, digit, ...] -- e.g. " 7" -> [space, "7"]. So
+# the discriminating token (7 vs 8) is NOT the first token the model emits after the prompt
+# (that's the shared space). We find where the two answers diverge, append the shared prefix
+# (the space) to BOTH prompts, and score the divergent digit at the final position.
+clean_ans_ids     = tokenizer(" " + CLEAN_ANSWER,     add_special_tokens=False)["input_ids"]
+corrupted_ans_ids = tokenizer(" " + CORRUPTED_ANSWER, add_special_tokens=False)["input_ids"]
+_div = 0
+while (_div < len(clean_ans_ids) and _div < len(corrupted_ans_ids)
+       and clean_ans_ids[_div] == corrupted_ans_ids[_div]):
+    _div += 1
+assert _div < len(clean_ans_ids) and _div < len(corrupted_ans_ids), \
+    f"clean/corrupted answers do not diverge: {clean_ans_ids} vs {corrupted_ans_ids}"
+_prefix_ids      = clean_ans_ids[:_div]               # shared leading tokens (e.g. [space])
+clean_ans_id     = clean_ans_ids[_div]                # discriminating token (the digit)
+corrupted_ans_id = corrupted_ans_ids[_div]
+log(f"answer tokens clean={clean_ans_ids} corrupted={corrupted_ans_ids}; shared prefix="
+    f"{_prefix_ids}; scoring divergent token clean_id={clean_ans_id} "
+    f"({tokenizer.decode([clean_ans_id])!r}) vs corrupted_id={corrupted_ans_id} "
+    f"({tokenizer.decode([corrupted_ans_id])!r})")
 
-clean_ans_id     = _single_token_id(CLEAN_ANSWER)
-corrupted_ans_id = _single_token_id(CORRUPTED_ANSWER)
-
-# Tokenize prompts (TL prepends BOS by default; both handled identically).
+# Tokenize prompts (TL prepends BOS), then APPEND the shared answer prefix so the FINAL
+# position predicts the discriminating digit (not the leading space).
 clean_tokens     = model.to_tokens(CLEAN_PROMPT)       # [1, seq]
 corrupted_tokens = model.to_tokens(CORRUPTED_PROMPT)   # [1, seq]
 assert clean_tokens.shape == corrupted_tokens.shape, \
     f"prompt length mismatch: {clean_tokens.shape} vs {corrupted_tokens.shape} — positions must align for patching"
+if _prefix_ids:
+    _pref = torch.tensor([_prefix_ids], device=clean_tokens.device, dtype=clean_tokens.dtype)
+    clean_tokens     = torch.cat([clean_tokens, _pref], dim=1)
+    corrupted_tokens = torch.cat([corrupted_tokens, _pref], dim=1)
 seq_len   = clean_tokens.shape[1]
-final_pos = seq_len - 1
+final_pos = seq_len - 1                                 # predicts the discriminating digit
 n_layers  = model.cfg.n_layers
+log(f"scored final position={final_pos} (prompt + {len(_prefix_ids)} shared answer-prefix "
+    f"token(s)); token there = {tokenizer.decode([clean_tokens[0, final_pos].item()])!r}")
 
-# Guard: the final prompt token must NOT itself be a lone space (would break the
-# answer-token convention). 'is' should be the last token.
-_last_tok_str = tokenizer.decode([clean_tokens[0, final_pos].item()])
-assert _last_tok_str.strip() != "", (
-    f"final prompt token decodes to whitespace {_last_tok_str!r}; remove the trailing "
-    f"space from the prompt so the model predicts a leading-space answer token")
-log(f"final prompt token = {_last_tok_str!r} (expected non-space, e.g. 'is')")
-
-# Sanity: confirm exactly one token differs (the corrupted operand) — else position
-# alignment / single-operand-corruption assumption is violated.
+# Sanity: clean & corrupted prompts must differ in exactly one token (the operand). The
+# appended prefix is identical for both, so it does not affect this.
 _diff = (clean_tokens[0] != corrupted_tokens[0]).nonzero().flatten().tolist()
 log(f"differing token positions (clean vs corrupted): {_diff} (expect exactly one operand token)")
 assert len(_diff) == 1, f"expected a single corrupted operand token, got positions {_diff}"
