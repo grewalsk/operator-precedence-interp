@@ -112,24 +112,35 @@ def _resolve_canonical(template):
             "core_len": len(ids), "toks": toks}
 
 # ---------------------------------------------------------------- build & cache ----
-if has_artifact("phase4_token_map", "json"):
+def _eq_index_at(template, pad_len):
+    """'=' (answer-cue) token index of a rendered, BOS-prefixed, pad_len-padded surface."""
+    ids, _ = _toks_with_specials(_render(template, pad_len=pad_len))
+    return len(ids) - 1     # '=' is always the final token
+
+# Reuse a cached map ONLY if it carries the tokenizer-MEASURED pad delta. Older maps assumed
+# len(PAD_UNIT)=2 tokens per pad unit, which is wrong on Llama (" + 0" folds in a standalone
+# space token -> 3 tokens), so such maps are discarded and rebuilt.
+if has_artifact("phase4_token_map", "json") and "pad_token_delta" in load_json("phase4_token_map"):
     _MAP = load_json("phase4_token_map")
     log("Phase 4: loaded cached token-boundary map.")
 else:
     _bos = _bos_offset()
+    # MEASURE the actual tokens added per suffix pad unit on THIS tokenizer, rather than
+    # assuming it from the number of PAD_UNIT segments.
+    _pad_delta = _eq_index_at("depth_right", 1) - _eq_index_at("depth_right", 0)
     _MAP = {
         "bos_offset": _bos,
-        "pad_style": "suffix_before_eq",     # eq shifts +len(PAD_UNIT)*k ; core invariant
-        "pad_unit_len": len(_PAD_UNIT),
+        "pad_style": "suffix_before_eq",
+        "pad_token_delta": int(_pad_delta),   # tokenizer-measured tokens per " + 0" pad unit
         "templates": {t: {k: v for k, v in _resolve_canonical(t).items() if k != "toks"}
                       for t in ("depth_left", "depth_right")},
         "notes": "Absolute indices into the BOS-prefixed sequence for SINGLE-TOKEN operands "
                  "(B='3',C='5'). Suffix pad k appends k*'+ 0' before '='; core indices are "
-                 "pad-invariant, eq index += pad_unit_len*k. Multi-token operands: use "
-                 "token_map_for_record(rec).",
+                 "pad-invariant, eq index += pad_token_delta*k (pad_token_delta MEASURED from "
+                 "the tokenizer, not assumed). Multi-token operands: use token_map_for_record(rec).",
     }
     save_json("phase4_token_map", _MAP)
-    log(f"Phase 4: token-boundary map saved (bos_offset={_bos}).")
+    log(f"Phase 4: token-boundary map saved (bos_offset={_bos}, pad_token_delta={_pad_delta}).")
 
 # ---------------------------------------------------------------- exported API ----
 def token_map(template, condition=None, pad_len=0):
@@ -139,13 +150,13 @@ def token_map(template, condition=None, pad_len=0):
       - critical_operator       : '*' index (its binding differs between conditions).
       - intermediate_decodable  : C index (last operand; B*C / held value decodable here).
       - role_flip               : op0 index (the additive-identity '0').
-      - answer_cue              : '=' index (shifts by pad_unit_len*pad_len).
+      - answer_cue              : '=' index (shifts by pad_token_delta*pad_len, tokenizer-measured).
     `condition` is accepted for call-site symmetry; the canonical map is condition-free."""
     if template not in _MAP["templates"]:
         raise ValueError(f"unknown template {template!r}; expected {list(_MAP['templates'])}")
     L = _MAP["templates"][template]
     k = int(pad_len)
-    shift = _MAP["pad_unit_len"] * k
+    shift = _MAP["pad_token_delta"] * k    # tokenizer-measured tokens per pad unit
     return {
         "probed_operand":        L["B"],
         "critical_operator":     L["star"],
@@ -220,8 +231,8 @@ def _test_token_map():
         m = token_map("depth_right", "right", k)
         ck(f"core invariant under pad (B,k={k})", m["probed_operand"], base["probed_operand"])
         ck(f"core invariant under pad (*,k={k})", m["critical_operator"], base["critical_operator"])
-        ck(f"answer_cue shift == pad_unit_len*k (k={k})",
-           m["answer_cue"] - base["answer_cue"], _MAP["pad_unit_len"] * k)
+        ck(f"answer_cue shift == pad_token_delta*k (k={k})",
+           m["answer_cue"] - base["answer_cue"], _MAP["pad_token_delta"] * k)
 
     # (4) Tokenizer-agnostic ORDERING invariant. (Absolute indices are NOT hardcoded:
     #     real Llama emits standalone bare-space tokens, so literal positions depend on the
