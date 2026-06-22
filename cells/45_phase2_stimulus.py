@@ -135,43 +135,37 @@ def _assemble(segs):
 #    (for repeated roles like 'star'/'lparen' we keep a list).
 # ----------------------------------------------------------------------------
 def _locate_tokens(text, spans):
-    if _HAS_OFFSETS:
-        enc = tokenizer(text, return_offsets_mapping=True, add_special_tokens=True)
-        ids = enc["input_ids"]
-        offs = enc["offset_mapping"]
-    else:
-        enc = tokenizer(text, add_special_tokens=True)
-        ids = enc["input_ids"]
-        offs = _fallback_offsets(text, ids)
+    """Tokenize `text` (with specials) and return (ids, role_index), where role_index
+    maps each role to the index of the token where that operand/operator BEGINS.
+
+    Location is ROBUST and offset_mapping-INDEPENDENT: we decode each token and walk
+    the string in order, recording the char position where each token's content
+    starts. This is the key fix vs. relying on the tokenizer's offset_mapping --
+    Llama-style tokenizers fold the leading space into a token (" 3"), and depending
+    on whether offsets include that space, an offset-based locator can leave EVERY
+    operand 'not located' and silently drop the whole dataset. Decode-and-walk has no
+    such ambiguity (it matches the visible token text), so operands are always found
+    when present."""
+    ids = tokenizer(text, add_special_tokens=True)["input_ids"]
+    starts, pos = [], 0
+    for tid in ids:
+        piece = tokenizer.decode([tid]).strip()
+        if piece == "":                       # special token (e.g. BOS) -> no char span
+            starts.append(None); continue
+        j = text.find(piece, pos)
+        if j < 0:                             # token text not found ahead (special/merge)
+            starts.append(None); continue
+        starts.append(j)
+        pos = j + len(piece)
     role_index = {}
     for (cs, ce, role) in spans:
         idx = None
-        for ti, (s, e) in enumerate(offs):
-            if e <= s:                       # special token / empty span -> skip
-                continue
-            if s >= cs and e <= ce:          # token fully inside the segment span
-                idx = ti
+        for i, sc in enumerate(starts):
+            if sc is not None and cs <= sc < ce:   # token begins inside the segment span
+                idx = i
                 break
-            if s < ce and e > cs and idx is None:  # overlap fallback (rare BPE merge)
-                idx = ti
         role_index.setdefault(role, []).append(idx)
     return ids, role_index
-
-def _fallback_offsets(text, ids):
-    """Approximate per-token char spans for a slow tokenizer by decoding tokens
-    and walking the string. Best-effort; only used if offset_mapping is absent."""
-    offs, cursor = [], 0
-    for tid in ids:
-        piece = tokenizer.decode([tid])
-        stripped = piece.strip()
-        if stripped == "":
-            offs.append((0, 0)); continue
-        j = text.find(stripped, cursor)
-        if j < 0:
-            offs.append((0, 0))
-        else:
-            offs.append((j, j + len(stripped))); cursor = j + len(stripped)
-    return offs
 
 # ----------------------------------------------------------------------------
 # 4) Ground-truth evaluation and structural tree depth.
@@ -366,11 +360,28 @@ def _build_dataset():
         },
     }
 
+# Tokenization sanity check (one glance, every run) so parity issues are visible
+# without a separate debug cell.
+for (_b, _c) in [(3, 5), (12, 34), (123, 45)]:
+    _l = make_record("depth_left", _b, _c, "A")
+    _r = make_record("depth_right", _b, _c, "A")
+    log(f"[tok-check] B={_b},C={_c}: left={_l['token_len']}tok right={_r['token_len']}tok "
+        f"Bidx {_l['operand_token_indices']['B']}/{_r['operand_token_indices']['B']} "
+        f"*idx {_l['operator_token_index']}/{_r['operator_token_index']} "
+        f"parity={'OK' if _l['token_len'] == _r['token_len'] else 'BROKEN'}")
+
+# Load the cached dataset ONLY if it is non-degenerate; otherwise regenerate. This
+# self-heals a stale empty cache from a half-run (the cause of an empty phase2_stimuli).
+_need_gen = True
 if has_artifact("dataset_phase2", "pickle"):
     DATA = load_pickle("dataset_phase2")
-    log(f"Phase 2: loaded cached dataset (A={len(DATA['factorA'])}, "
-        f"B={len(DATA['factorB'])}, C={len(DATA['factorC'])}).")
-else:
+    if len(DATA.get("factorA", [])) >= 2:
+        _need_gen = False
+        log(f"Phase 2: loaded cached dataset (A={len(DATA['factorA'])}, "
+            f"B={len(DATA['factorB'])}, C={len(DATA['factorC'])}).")
+    else:
+        log("Phase 2: cached dataset is EMPTY/degenerate -> discarding and regenerating.")
+if _need_gen:
     log("Phase 2: generating controlled stimuli (CPU; tokenizer only)...")
     DATA = _build_dataset()
     save_pickle("dataset_phase2", DATA)
@@ -381,7 +392,10 @@ else:
 #    conditions, with {prompt, B, C, answer, ...}. Saved under 'phase2_stimuli'
 #    (the first name Phase 3 searches).
 # ----------------------------------------------------------------------------
-if not has_artifact("phase2_stimuli", "json"):
+# Write the Phase-3-facing view if it's missing OR stale-empty (so a prior empty
+# run can't poison Phase 3). Always reflects the current factorA.
+_p2_stale = has_artifact("phase2_stimuli", "json") and (not load_json("phase2_stimuli"))
+if (not has_artifact("phase2_stimuli", "json")) or _p2_stale:
     save_json("phase2_stimuli", DATA["factorA"])
     save_json("phase2_surface_spec", DATA["surface_spec"])
     log(f"Phase 2: wrote phase2_stimuli (n={len(DATA['factorA'])}) for Phase 3.")
@@ -445,15 +459,28 @@ set_gate("G2", g2_pass, g2_detail)
 print(f"\nGATE G2: {'PASS' if g2_pass else 'FAIL'}  ({g2_detail})")
 if not g2_pass:
     print("FAIL GUIDANCE:")
+    print(f"  Factor A drop reasons: {_fmt_drops(DATA['drops']['A'])}")
+    # Self-explanatory dump: show how the REAL tokenizer renders a pair, so the
+    # failure is fully diagnosable from THIS output alone (no extra debug cell).
+    for (_b, _c) in [(3, 5), (12, 34)]:
+        _l = make_record("depth_left", _b, _c, "A")
+        _r = make_record("depth_right", _b, _c, "A")
+        print(f"  example B={_b},C={_c}:")
+        print(f"    left  {_l['token_len']}tok B@{_l['operand_token_indices']['B']} "
+              f"C@{_l['operand_token_indices']['C']} *@{_l['operator_token_index']}: "
+              f"{[tokenizer.decode([t]) for t in _l['token_ids']]}")
+        print(f"    right {_r['token_len']}tok B@{_r['operand_token_indices']['B']} "
+              f"C@{_r['operand_token_indices']['C']} *@{_r['operator_token_index']}: "
+              f"{[tokenizer.decode([t]) for t in _r['token_ids']]}")
     if not parity_ok:
-        print(" - Token-length parity broke for some pair -> the tokenizer is fighting the")
-        print("   design. Inspect drops['A']['token_length_mismatch']; restrict g2_digit_grid")
-        print("   to operand digit-counts that tokenize consistently, then re-run.")
+        print(" - Token-length parity broke -> the two forms render to different lengths.")
+        print("   Restrict CFG['g2_digit_grid'] to digit-counts that match, then re-run.")
     if nA_pairs < floor:
-        print(f" - Only {nA_pairs} clean Factor-A pairs (< {floor}). Raise g2_sample_budget or")
-        print("   widen g2_digit_grid to ranges that survive the token-length control.")
+        print(f" - Only {nA_pairs} clean Factor-A pairs (< {floor}). If drops are *_not_located")
+        print("   the locator missed an operand; if token_length_mismatch it's real parity.")
+        print("   Paste this whole block to me and I'll patch it.")
     if nB_series < floor:
-        print(" - Too few padding series survived; check drops['B'] for the dominant reason.")
+        print(" - Too few padding series survived; see drops['B'] for the dominant reason.")
 # Factor C is intentionally NOT a G2 gate condition (weaker controls; Phase 8 upside).
 if nC < floor:
     print(f"NOTE: only {nC} depth-2 (Factor C) stimuli (< {floor}); fine for now since C is "
