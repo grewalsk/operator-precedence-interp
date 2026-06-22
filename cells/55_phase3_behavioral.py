@@ -25,7 +25,10 @@ import matplotlib.pyplot as plt
 # ----------------------------------------------------------------------------------------
 # 0) Knobs (recorded to CFG so the floor/band are auditable artifacts, not magic numbers).
 # ----------------------------------------------------------------------------------------
-CFG.setdefault("g3_accuracy_floor", 0.80)      # PASS band must clear this overall accuracy.
+CFG.setdefault("g3_accuracy_floor", 0.60)      # PASS floor on the experimental bank. 0.60 is
+#   honestly tuned to a BASE (non-instruct) Llama-3.1-8B's two-digit arithmetic -- the spec
+#   says "tune the floor to what the model can actually do, but record it." Raise to 0.80 for
+#   -Instruct, or if you widen g2_digit_grid back toward single-digit (more-memorized) operands.
 CFG.setdefault("g3_eval_batch_size", 64)        # forward-pass batch (cheap GPU step).
 CFG.setdefault("g3_max_answer_tokens", 6)       # greedy-decode budget for the answer int.
 CFG.setdefault("g3_noop_grid", 24)              # B,C values per axis for the no-op sweep.

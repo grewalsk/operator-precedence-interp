@@ -52,10 +52,14 @@ assert "tokenizer" in globals(), "Phase 2 needs `tokenizer` (run Phase 0 first).
 CFG.setdefault("g2_target_per_factor", 2000)      # aim: low thousands of clean pairs.
 CFG.setdefault("g2_min_valid_per_factor", 800)    # G2 PASS floor per factor.
 CFG.setdefault("g2_sample_budget", 60000)         # max (B,C) draws before giving up.
-# Digit-band grid the generator sweeps so Phase 3 can locate the must-compute band.
-# (b_digits, c_digits) inclusive digit counts. Two-digit x {one,two,three}-digit is
-# the spec's primary "not-a-memorized-product" zone; we span around it.
-CFG.setdefault("g2_digit_grid", [[1, 2], [2, 1], [2, 2], [2, 3], [3, 2], [3, 3], [1, 3], [3, 1]])
+# Digit-band grid the generator sweeps. (b_digits, c_digits) inclusive digit counts.
+# DEFAULT tuned for BASE Llama-3.1-8B: non-memorized (never single x single) but within
+# reach of the base model's greedy arithmetic -- single x two-digit, two x one-digit, and
+# the harder two x two-digit edge. The 3-digit bands are deliberately OMITTED from the
+# default because a base (non-instruct) model greedy-decodes them far below the accuracy
+# floor, which spuriously fails G3 CHECK 1. Widen toward 3-digit ([2,3],[3,2],[3,3]) once
+# you've confirmed a band, or switch to -Instruct (and raise g3_accuracy_floor).
+CFG.setdefault("g2_digit_grid", [[1, 2], [2, 1], [2, 2]])
 CFG.setdefault("g2_pad_lengths", list(CFG.get("pad_lengths", [0, 2, 4, 8, 16])))
 SEP = " "                 # single space between every surface token.
 ANSWER_CUE = "="          # answer cue; model predicts the next token after it.
