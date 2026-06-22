@@ -1,0 +1,6 @@
+---
+# Phase 3.5 — Behavioral control battery (additive‑identity disruption isolation)
+
+Base Llama‑3.1‑8B computes `B * C =` well but the meaning‑preserving `( 0 + B ) * C =` poorly — the additive‑identity "no‑op" premise is behaviorally **false**. Before any *novel* precedence patching, this battery (forward‑pass only, **no patching**) isolates **which** structural ingredient causes the disruption (parens vs identity vs the combination, and whether it fails *inside* or *after* the paren) and **whether the two depth conditions are equally disrupted** — the differential‑difficulty confound that decides whether precedence *localization* (future Phases 6–9) is even valid.
+
+Eight conditions (C0–C7), all evaluated on **one shared operand‑pair list** drawn from the locked must‑compute band, yield a **decision gate**: if `|acc(depth_left) − acc(depth_right)| ≤ 0.10` **and** the correct‑subset overlap ≥ 0.60, localization may proceed on the matched correct‑only subset (with the selection caveat); otherwise localization drops to future work and the primary contribution pivots to the **brittleness** characterization. This gates the *novel* localization only — it does **not** block the G4 known‑result validation (Phase 5). Per the spec, `‑Instruct` is a valid *second* experiment ("does tuning install the robustness the base model lacks?"), not an escape hatch.
