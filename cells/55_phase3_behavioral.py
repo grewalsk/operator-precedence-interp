@@ -54,69 +54,54 @@ if "set_gate" not in globals():
         return gates[name]
 
 # ----------------------------------------------------------------------------------------
-# 2) Consume the Phase 2 stimuli artifact (tolerant: name + schema may vary across builds),
-#    falling back to a *token-controlled* regenerator so G3 is runnable even if Phase 2's
-#    exact field names differ. A stimulus is a dict with at least: prompt, B, C, answer.
+# 2) PINNED CONTRACT: Phase 2 writes 'phase2_stimuli'; Phase 3 reads 'phase2_stimuli'.
+#    Fail LOUDLY if absent -- Phase 3 deliberately does NOT regenerate a fallback bank,
+#    because a *different* surface form would make a green G3 certify a stimulus the
+#    experiment never actually runs on. Every record is the canonical PARENTHESIZED
+#    SYMBOLIC surface ("( 0 + B ) * C =") -- the exact surface every downstream patch
+#    indexes against.
 # ----------------------------------------------------------------------------------------
-def _coerce_stimuli(obj):
-    """Normalize whatever Phase 2 saved into a list[dict(prompt,B,C,answer)]."""
-    rows = obj
-    if isinstance(obj, dict):
-        for k in ("stimuli", "items", "data", "examples", "rows", "experimental", "exp"):
-            if k in obj and isinstance(obj[k], (list, tuple)):
-                rows = obj[k]; break
-    out = []
-    for r in rows:
-        if not isinstance(r, dict):
-            continue
-        prompt = r.get("prompt", r.get("text", r.get("input", r.get("expr"))))
-        B = r.get("B", r.get("b"))
-        C = r.get("C", r.get("c"))
-        ans = r.get("answer", r.get("target", r.get("gt", r.get("label", r.get("y")))))
-        if prompt is None:
-            continue
-        if ans is None and B is not None and C is not None:
-            ans = int(B) * int(C)
-        if ans is None:
-            continue
-        out.append({"prompt": str(prompt),
-                    "B": (None if B is None else int(B)),
-                    "C": (None if C is None else int(C)),
-                    "answer": int(ans)})
-    return out
+if not has_artifact("phase2_stimuli", "json"):
+    raise RuntimeError(
+        "Phase 3 requires the Phase 2 artifact 'phase2_stimuli'. It is absent -- run the "
+        "Phase 2 / G2 cell first. Phase 3 does NOT fabricate a fallback surface: a different "
+        "surface form would make a green G3 certify a stimulus the experiment never runs on.")
+_p2 = load_json("phase2_stimuli")
+assert isinstance(_p2, list) and _p2, "phase2_stimuli must be a non-empty list of records."
+STIM = []
+for r in _p2:
+    _missing = [k for k in ("prompt", "B", "C", "answer", "condition") if k not in r]
+    assert not _missing, f"phase2_stimuli record missing keys {_missing}: {sorted(r)[:8]}"
+    STIM.append({"prompt": str(r["prompt"]), "B": int(r["B"]), "C": int(r["C"]),
+                 "answer": int(r["answer"]), "condition": r["condition"]})
+src_name = "phase2_stimuli"
+log(f"G3 operating on {len(STIM)} canonical Phase 2 stimuli (source='{src_name}'); "
+    f"accuracy floor={ACC_FLOOR}")
 
-def _fmt_expr(B, C):
-    # The additive-identity (0+B)*C stimulus. Phase 2 owns the canonical surface form; this
-    # mirror is only used by the guarded fallback when no Phase 2 artifact is on disk.
-    return f"{(0)}+{B} times {C} equals "  # word 'times' avoids '*' tokenization quirks.
+# ----------------------------------------------------------------------------------------
+# 2b) Canonical surface renderer -- byte-identical to Phase 2's phase2_stimuli surface.
+#     CHECK 1 reads stored prompts directly; CHECK 2 (no-op grid) and CHECK 3 (must-compute
+#     bins) need FRESH (B,C) NOT present in the artifact, so they render here. Using THIS
+#     renderer (not an English paraphrase like "B times C equals") is what guarantees all
+#     three G3 checks exercise the experiment's exact '(' / '*' / '=' tokenization regime --
+#     which IS the operator-precedence signal under study. We verify it against a real
+#     phase2_stimuli record so it can never silently drift from Phase 2's _segments.
+# ----------------------------------------------------------------------------------------
+def _render_canonical(B, C, condition="depth_left"):
+    B, C = int(B), int(C)
+    if condition == "depth_left":   return f"( 0 + {B} ) * {C} ="   # (0+B)*C = B*C  (additive identity)
+    if condition == "depth_right":  return f"0 + ( {B} * {C} ) ="   # 0+(B*C) = B*C
+    if condition == "bare":         return f"{B} * {C} ="           # bare-mult control (no identity)
+    raise ValueError(f"unknown condition {condition!r}")
 
-def _load_phase2_stimuli():
-    for nm in ("phase2_stimuli", "stimuli", "phase2_stims", "p2_stimuli",
-               "stimuli_experimental", "phase2_exp", "phase2"):
-        if has_artifact(nm):
-            stim = _coerce_stimuli(load_json(nm))
-            if stim:
-                log(f"Phase 2 stimuli loaded from artifact '{nm}': n={len(stim)}")
-                return stim, nm
-    # --- guarded fallback: regenerate a token-controlled bank (cached) ---
-    log("WARNING: no Phase 2 stimuli artifact found; regenerating a controlled fallback bank.")
-    rng = np.random.default_rng(seed)
-    stim = []
-    for (lo, hi) in CFG["g3_operand_bins"]:
-        for _ in range(CFG["g3_per_bin_n"]):
-            B = int(rng.integers(lo, hi + 1)); C = int(rng.integers(lo, hi + 1))
-            stim.append({"prompt": _fmt_expr(B, C), "B": B, "C": C, "answer": B * C})
-    save_json("phase3_stimuli_fallback", stim)
-    return stim, "phase3_stimuli_fallback"
-
-if has_artifact("phase3_stimuli_resolved"):
-    STIM = load_json("phase3_stimuli_resolved")
-    src_name = load_text("phase3_stimuli_src") if has_artifact("phase3_stimuli_src") else "cached"
-else:
-    STIM, src_name = _load_phase2_stimuli()
-    save_json("phase3_stimuli_resolved", STIM)
-    save_text("phase3_stimuli_src", src_name)
-log(f"G3 operating on {len(STIM)} stimuli (source='{src_name}'); accuracy floor={ACC_FLOOR}")
+for _cond in ("depth_left", "depth_right"):
+    _ex = next((r for r in STIM if r["condition"] == _cond), None)
+    if _ex is not None:
+        _r = _render_canonical(_ex["B"], _ex["C"], _cond)
+        assert _r == _ex["prompt"], (
+            f"Phase 3 surface renderer drifted from Phase 2 for {_cond}: {_r!r} != stored "
+            f"{_ex['prompt']!r}. Re-sync _render_canonical with Phase 2's _segments/_assemble.")
+log("Phase 3: canonical surface renderer verified against phase2_stimuli (no drift).")
 
 # ----------------------------------------------------------------------------------------
 # 3) Robust greedy decode + integer parser. Works for transformer_lens HookedTransformer
@@ -277,8 +262,9 @@ log(f"CHECK1 ACCURACY: overall={acc_res['overall_accuracy']:.3f} "
 # CHECK 2 — NO-OP CHECK (guards the additive-identity correction).
 #   (a) Hold structure fixed, sweep B,C on a grid; confirm prediction TRACKS B*C.
 #   (b) Confirm "0 +" prefix does NOT make the model ignore the multiplication: compare
-#       the (0+B)*C surface against a bare "B times C" surface on the same (B,C) grid;
-#       both must track B*C and agree, i.e. the additive identity is a true no-op.
+#       the canonical "( 0 + B ) * C =" surface against a bare "B * C =" surface (SAME
+#       symbolic regime) on the same (B,C) grid; both must track B*C and agree, i.e. the
+#       additive identity is a true no-op.
 # ----------------------------------------------------------------------------------------
 if has_artifact("g3_noop_result"):
     noop_res = load_json("g3_noop_result")
@@ -291,14 +277,15 @@ else:
     pairs = [(B, C) for B in Bs for C in Cs]
     bc = np.array([B * C for (B, C) in pairs], dtype=float)
 
-    # (a) experimental surface "(0+B)*C"
-    p_exp = [_fmt_expr(B, C) for (B, C) in pairs]
+    # (a) experimental surface: canonical "( 0 + B ) * C ="  (the additive-identity surface
+    #     the experiment ACTUALLY runs on -- same '(' / '*' / '=' tokenization regime).
+    p_exp = [_render_canonical(B, C, "depth_left") for (B, C) in pairs]
     c_exp = _eval_prompts(p_exp, "g3_pred_noop_exp")
     y_exp = np.array([_parse_to_nan(t) for t in c_exp])
 
-    # (b) bare-multiplication control "B times C" (no additive identity)
-    def _fmt_bare(B, C): return f"{B} times {C} equals "
-    p_bare = [_fmt_bare(B, C) for (B, C) in pairs]
+    # (b) bare-multiplication control: canonical "B * C ="  (no additive identity, SAME
+    #     symbolic regime). If "( 0 + B )" is a true no-op, (a) and (b) must agree per pair.
+    p_bare = [_render_canonical(B, C, "bare") for (B, C) in pairs]
     c_bare = _eval_prompts(p_bare, "g3_pred_noop_bare")
     y_bare = np.array([_parse_to_nan(t) for t in c_bare])
 
@@ -343,7 +330,7 @@ else:
         # sample fresh controlled stimuli for this bin (cached via per-bin pred artifact)
         Bs = rng.integers(blo, bhi + 1, size=per).tolist()
         Cs = rng.integers(blo, bhi + 1, size=per).tolist()
-        prompts = [_fmt_expr(int(B), int(C)) for B, C in zip(Bs, Cs)]
+        prompts = [_render_canonical(int(B), int(C), "depth_left") for B, C in zip(Bs, Cs)]
         golds = [int(B) * int(C) for B, C in zip(Bs, Cs)]
         conts = _eval_prompts(prompts, f"g3_pred_bin_{bi}")
         preds = [parse_int(c) for c in conts]
@@ -488,8 +475,10 @@ if not g3_pass:
         print("   the Phase 2 token-/answer-control gate (G2) on the new surface form.")
     if not c2:
         if not c2_track:
-            print(" - Predictions don't track B*C. Stimulus surface may not elicit the product")
-            print("   (tokenization of 'times', wrong answer cue). Revisit Phase 2 surface.")
+            print(" - Predictions don't track B*C on the canonical '( 0 + B ) * C =' surface.")
+            print("   The base model may not greedily evaluate the symbolic '*'/precedence form")
+            print("   (this is itself a finding). Try -Instruct / few-shot, then RE-RUN G2 on the")
+            print("   new surface so Phase 2 and Phase 3 stay on the SAME stimulus.")
         if not c2_noop:
             print(" - '0 +' is NOT a no-op (additive-identity surface disagrees with bare B*C).")
             print("   The additive-identity correction is unjustified on this model — reconsider.")

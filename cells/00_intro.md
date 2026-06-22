@@ -21,7 +21,7 @@ This notebook is built to **survive GPU disconnects**. Every expensive step writ
 **To resume after a disconnect:** just **re‑run the notebook top‑to‑bottom** (`Restart & Run All` works). Completed phases load their cached artifacts from disk in seconds and are skipped; only unfinished work re‑runs. The model itself is reloaded each fresh session (GPU memory can't be checkpointed) but everything derived from it is cached.
 
 **One‑time setup before the first run:**
-1. A GPU with **≥ 40 GB** (Llama‑3.1‑8B in bf16 needs ~16 GB weights + activation cache). A100‑40GB / H100 are fine; a 16 GB T4 will **not** fit.
+1. A GPU with **≥ 24 GB** is the honest floor: ~16 GB bf16 weights + ~2 GB activation cache (sequences are sub‑30 tokens) + overhead, so an **A10 / L4 / RTX 3090** works. **40 GB (A100/H100) recommended for comfort.** A 16 GB T4 will **not** fit.
 2. Llama‑3.1‑8B is **gated** on Hugging Face — request access on the model page and set your token: `export HF_TOKEN=hf_...` (or `HUGGINGFACE_TOKEN`). The Phase 0 cell logs in with it.
 3. (Colab) The checkpoint cell tries to mount Google Drive so `ART` persists across runtime resets. On a dedicated box it uses a local persistent dir under `$HOME`.
 

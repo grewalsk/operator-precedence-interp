@@ -27,7 +27,7 @@ Within a pair, token‑length parity and B's token index are **hard assertions**
 
 ## Run it
 
-1. **GPU ≥ 40 GB** (bf16 weights ~16 GB + activation cache; a 16 GB T4 won't fit).
+1. **GPU ≥ 24 GB** is the honest floor — ~16 GB bf16 weights + ~2 GB activation cache (sequences are sub‑30 tokens) + overhead, so an **A10 / L4 / RTX 3090** works. **40 GB (A100/H100) recommended for comfort.** A 16 GB T4 will *not* fit.
 2. Llama‑3.1‑8B is gated — request access and `export HF_TOKEN=hf_...`.
 3. Open the notebook (Colab badge above) and **Run All**. It survives disconnects: every expensive step is checkpointed to a persistent `ART` dir behind an `if has_artifact(...)` guard, so re‑running top‑to‑bottom skips finished work. **G2 needs no GPU** — run the checkpoint + Phase 2 cells on CPU first to confirm the controlled stimulus actually builds against the real tokenizer.
 

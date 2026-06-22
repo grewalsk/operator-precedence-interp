@@ -404,7 +404,7 @@ report.append(f"Factor A  valid pairs      : {nA_pairs}   (records={len(DATA['fa
 report.append(f"Factor A  drops            : {_fmt_drops(DATA['drops']['A'])}")
 report.append(f"Factor B  valid pad-series : {nB_series} (records={len(DATA['factorB'])}, pads={CFG['g2_pad_lengths']})")
 report.append(f"Factor B  drops            : {_fmt_drops(DATA['drops']['B'])}")
-report.append(f"Factor C  valid depth-2    : {nC}")
+report.append(f"Factor C  valid depth-2    : {nC}   (Phase 8 upside; weaker controls, NOT gated)")
 report.append(f"Factor C  drops            : {_fmt_drops(DATA['drops']['C'])}")
 report.append(f"BOS offset                 : {BOS_OFFSET}")
 report.append(f"PASS floor per factor      : {floor}")
@@ -432,9 +432,14 @@ report_text = "\n".join(report)
 save_text("assertion_report", report_text)
 print(report_text)
 
-g2_pass = bool(parity_ok and nA_pairs >= floor and nB_series >= floor and nC >= floor)
-g2_detail = (f"A_pairs={nA_pairs}, B_series={nB_series}, C={nC} (floor={floor}); "
-             f"parity={parity_ok}; A_drops={_fmt_drops(DATA['drops']['A'])}")
+# G2 PASS hinges ONLY on the genuinely token-controlled factors: Factor A (token-identical
+# pairs, B-index parity) and Factor B (answer/depth-preserving padding). Factor C (depth-2)
+# has WEAKER controls -- answer-preserving + parens + operator-located, but NOT held to
+# Factor-A token-length parity -- and is explicit Phase 8 upside, so it is REPORTED but does
+# NOT gate G2 (it must not stand on equal footing with the controlled factors).
+g2_pass = bool(parity_ok and nA_pairs >= floor and nB_series >= floor)
+g2_detail = (f"A_pairs={nA_pairs}, B_series={nB_series} (floor={floor}); parity={parity_ok}; "
+             f"C(depth-2, ungated)={nC}; A_drops={_fmt_drops(DATA['drops']['A'])}")
 set_gate("G2", g2_pass, g2_detail)
 
 print(f"\nGATE G2: {'PASS' if g2_pass else 'FAIL'}  ({g2_detail})")
@@ -449,5 +454,7 @@ if not g2_pass:
         print("   widen g2_digit_grid to ranges that survive the token-length control.")
     if nB_series < floor:
         print(" - Too few padding series survived; check drops['B'] for the dominant reason.")
-    if nC < floor:
-        print(" - Too few depth-2 stimuli; relax Factor C operand draw or raise budget.")
+# Factor C is intentionally NOT a G2 gate condition (weaker controls; Phase 8 upside).
+if nC < floor:
+    print(f"NOTE: only {nC} depth-2 (Factor C) stimuli (< {floor}); fine for now since C is "
+          f"ungated, but raise g2_sample_budget before Phase 8 if you want more.")
