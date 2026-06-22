@@ -5,14 +5,14 @@
 # Reconciled to Phase 2's PARENTHESIZED additive-identity templates + SUFFIX
 # padding (must match Phase 2's surface EXACTLY or every patch is mis-indexed):
 #   depth_left  : "( 0 + B ) * C ="   -> (0+B)*C   ; '*' at paren-depth 0
-#   depth_right : "0 + ( B * C ) ="   -> 0+(B*C)   ; '*' at paren-depth 1
+#   depth_right : "( 0 + B * C ) ="   -> 0+(B*C)   ; '*' at paren-depth 1
 #   suffix pad k: append " + 0" * k before "=" (grows length, not '*'-depth).
 #
 # Two layers of mapping:
 #   (1) token_map(template, condition, pad_len) -> CANONICAL indices for the
 #       hand-verifiable SINGLE-TOKEN-operand probe (B='3', C='5'). Shared across
 #       all single-token-operand examples of a template (the spec's "patch fixed
-#       indices" payoff). eq index shifts by +2k under suffix padding; the core
+#       indices" payoff). eq index shifts by a tokenizer-measured delta per pad unit; core
 #       operand/operator indices are INVARIANT to k (padding is suffixed).
 #   (2) token_map_for_record(rec) -> the EXACT per-example indices Phase 2 already
 #       stored, the robust path when operands are multi-token (their token length,
@@ -23,7 +23,7 @@
 #     detection is only a fallback and disagreement is logged loudly.
 #   * Unit tests locate operator/operands by TOKEN CONTENT in an INDEPENDENT
 #     re-tokenization (not by reusing the implementation's offsets), so an
-#     off-by-one in the core layout OR the +2k suffix shift actually fails.
+#     off-by-one in the core layout OR the per-pad-unit suffix shift actually fails.
 # ============================================================================
 
 import json
