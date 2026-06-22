@@ -17,7 +17,7 @@
 #   * Must-compute: 'graceful degradation' now requires a real accuracy DROP across the band,
 #     so a flat (e.g. 50%) curve can no longer masquerade as computation.
 
-import re, time
+import re, time, hashlib
 import numpy as np
 import torch
 import matplotlib.pyplot as plt
@@ -47,11 +47,12 @@ seed = int(CFG.get("seed", 0))
 # ----------------------------------------------------------------------------------------
 if "set_gate" not in globals():
     def set_gate(name, passed, detail=""):
-        gates = load_json("gates") if has_artifact("gates") else {}
-        gates[name] = {"pass": bool(passed), "detail": str(detail), "ts": time.time()}
-        save_json("gates", gates)
+        # fallback writes the SAME ledger the dashboard reads (gate_status.json / 'passed')
+        gates = load_json("gate_status") if has_artifact("gate_status", "json") else {}
+        gates[str(name)] = {"passed": bool(passed), "detail": str(detail), "ts": time.time()}
+        save_json("gate_status", gates)
         log(f"[gate] {name} = {'PASS' if passed else 'FAIL'} :: {detail}")
-        return gates[name]
+        return gates[str(name)]
 
 # ----------------------------------------------------------------------------------------
 # 2) PINNED CONTRACT: Phase 2 writes 'phase2_stimuli'; Phase 3 reads 'phase2_stimuli'.
@@ -218,24 +219,37 @@ def _parse_to_nan(text):
 #    Prompts for each key are regenerated deterministically (fixed seeds) so a cached
 #    prefix stays aligned with the current prompt list across reruns.
 # ----------------------------------------------------------------------------------------
+def _prompts_fp(prompts):
+    # \x00 join: a delimiter that cannot occur inside a prompt, so the fingerprint is unambiguous.
+    return hashlib.sha1("\x00".join(prompts).encode("utf-8")).hexdigest()
+
 def _eval_prompts(prompts, cache_key):
-    """Greedy-decode every prompt, return list[str] continuations. Resumable: persists a
-    growing list and only decodes the not-yet-done tail."""
-    if has_artifact(cache_key):
-        cont = load_json(cache_key)
-        if len(cont) >= len(prompts):
-            log(f"[{cache_key}] cached ({len(cont)} preds) — skipping forward passes.")
-            return cont[:len(prompts)]
-        # cached prefix shorter than needed -> resume from where it stopped.
-    else:
-        cont = []
+    """Greedy-decode every prompt, return list[str] continuations. Resumable AND
+    FINGERPRINTED: the cache stores the hash of the prompts it covers, so changing a G3
+    knob/seed (which changes the prompt list) can never silently reuse stale predictions
+    against new prompts -- a fingerprint mismatch discards the cache and recomputes."""
+    cont = []
+    if has_artifact(cache_key, "json"):
+        blob = load_json(cache_key)
+        if isinstance(blob, dict) and "cont" in blob:                 # fingerprinted format
+            _c, _h = blob["cont"], blob.get("prompts_hash")
+            if _h == _prompts_fp(prompts[:len(_c)]):                  # cache is a prefix of CURRENT prompts
+                cont = _c
+            else:
+                log(f"[{cache_key}] stale cache (prompt fingerprint mismatch) -> recomputing.")
+        else:                                                          # legacy bare list: unverifiable
+            log(f"[{cache_key}] legacy unfingerprinted cache -> recomputing.")
+    if len(cont) >= len(prompts):
+        log(f"[{cache_key}] cached ({len(cont)} preds) — skipping forward passes.")
+        return cont[:len(prompts)]
     bs = int(CFG["g3_eval_batch_size"])
     start = len(cont)
     log(f"[{cache_key}] decoding {len(prompts)-start} / {len(prompts)} prompts (resume @ {start})")
     for i in range(start, len(prompts), bs):
         chunk = prompts[i:i + bs]
         cont.extend(_greedy_continuations(chunk))
-        save_json(cache_key, cont)   # checkpoint after every batch -> disconnect-safe.
+        # checkpoint after every batch (disconnect-safe), fingerprinted by the prefix it covers.
+        save_json(cache_key, {"prompts_hash": _prompts_fp(prompts[:len(cont)]), "cont": cont})
     return cont[:len(prompts)]
 
 # ----------------------------------------------------------------------------------------

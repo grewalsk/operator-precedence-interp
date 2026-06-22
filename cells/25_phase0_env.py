@@ -106,6 +106,17 @@ class HFHookedWrapper:
         self.device = device
         self._is_fallback = True
 
+    # nn.Module-style methods later phases rely on (Phase 5 calls model.eval()).
+    # Delegate explicitly to the wrapped HF model -- NOT via __getattr__, which
+    # would infinitely recurse if self._m is ever unbound (unpickle/pre-__init__).
+    def eval(self):
+        self._m.eval()
+        return self
+
+    def train(self, mode=True):
+        self._m.train(mode)
+        return self
+
     def to_tokens(self, text, prepend_bos=True):
         enc = self.tokenizer(text, return_tensors="pt", add_special_tokens=prepend_bos)
         return enc["input_ids"].to(self.device)

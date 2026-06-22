@@ -37,14 +37,17 @@
 import numpy as np
 import torch
 
-# ---- set_gate: documented helpers have no gate registry, so define one defensively,
-# ---- persisting via the documented save_json/load_json.
-def set_gate(name, passed, detail=""):
-    gates = load_json('gates') if has_artifact('gates') else {}
-    gates[name] = {"pass": bool(passed), "detail": str(detail)}
-    save_json('gates', gates)
-    log(f"GATE {name}: {'PASS' if passed else 'FAIL'} — {detail}")
-    return gates[name]
+# ---- set_gate: REUSE the checkpoint cell's canonical ledger when present (every real
+# ---- top-to-bottom or resume run). Only define a self-contained fallback on a bare
+# ---- kernel -- and have it write the SAME gate_status.json / {'passed':...} schema the
+# ---- dashboard reads, so G4 is never stranded in a separate file.
+if "set_gate" not in globals():
+    def set_gate(name, passed, detail=""):
+        gates = load_json('gate_status') if has_artifact('gate_status', 'json') else {}
+        gates[str(name)] = {"passed": bool(passed), "detail": str(detail)}
+        save_json('gate_status', gates)
+        log(f"GATE {name}: {'PASS' if passed else 'FAIL'} — {detail}")
+        return gates[str(name)]
 
 # --------------------------------------------------------------------------------
 # 1) Clean / corrupted prompt pair with KNOWN, single-token, DIFFERING answers.
