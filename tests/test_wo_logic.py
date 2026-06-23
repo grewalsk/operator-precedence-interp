@@ -278,6 +278,12 @@ def test_wilson_ci():
     check("wilson k=0 lo clamped to ~0 (non-negative)", 0.0 <= lo0 < 1e-6 and hi0 > 0.0)
     lon, hin = w(100, 100)
     check("wilson k=n hi clamped to 1", hin == 1.0 and lon < 1.0)
+    # out-of-domain k>n must NOT raise (clamped to n) — defensive guard.
+    try:
+        og = w(10, 5)
+        check("wilson k>n clamped, no math-domain error", og == w(5, 5))
+    except Exception as e:
+        check(f"wilson k>n clamped, no math-domain error (raised {type(e).__name__})", False)
 
 
 # ------------------------------------------------- WO#2 §3.6 output classifier

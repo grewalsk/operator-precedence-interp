@@ -49,7 +49,12 @@ gotchas §6).
 
 ## 3. What changed (scope your review here)
 
-Run `git diff` against the parent commit; the change touches **only** these files:
+Review the **complete change**. It is committed as `b312884` on branch `wo2-causal-hardening`.
+See it with `git show --stat b312884` and read cells with `git show b312884 -- cells/82_wo_downstream.py`
+(or `git diff main...wo2-causal-hardening`). **Do not** use `git diff HEAD~1` — the history contains
+unrelated "Add files via upload" commits. If reviewing an uncommitted working tree instead, run **both**
+`git status --short` and `git ls-files --others --exclude-standard` (the new cells `82a/82b/82c` may be
+untracked and invisible to a plain `git diff`). The change touches **only** these files:
 
 - `cells/76_wo_logic.py` — new section "8b": `wo_bootstrap_ci`, `wo_paired_delta_ci`, `wo_wilson_ci`,
   `wo_classify_wrong_output`, `wo_fewshot_render`, `wo_shuffle_control`, plus added inline self-test asserts.
@@ -84,6 +89,9 @@ must use `WO_`/`wo_` prefixes only.
   ~1/√n, determinism, paired-delta excludes/contains 0, the classifier ties, the few-shot format), or
   are they shallow enough to let a bug through? Run `python3 tests/test_wo_logic.py` — it must print
   `ALL PASS`. Try to construct an input that breaks a function but passes the tests.
+- **Domain guards:** for each new public function, feed an **out-of-domain** input (e.g.
+  `wo_wilson_ci(k>n)`, empty masks, `shots > len(pool)`) and confirm it degrades gracefully rather than
+  raising — the tests only check documented in-range values, so a missing `0 ≤ k ≤ n` guard can hide.
 
 ### B. The salvage GPU rewrite (`cells/82_wo_downstream.py`, `_wo_salvage`)
 This is the load-bearing change. Verify each task and **every runtime hazard**:
@@ -101,9 +109,20 @@ This is the load-bearing change. Verify each task and **every runtime hazard**:
 - **§3.3 exclusion fix:** keep `(B,C)` iff C1's **full parsed answer ≠ B·C**, read from the
   **in-memory** `WO_*_RES["C1"]["correct_mask"]` index-aligned to `WO_PAIRS` (the saved JSON strips
   masks — confirm the in-memory path is used, not a reload of a stripped file). `wo_salvage_n` default
-  256; runs on **both** tags; outputs `salvage_c6_to_c1_{tag}.json`. Is `n_used ≥ 80` actually
-  achievable from the wrong-candidate pool on each tag? Does the new criterion correctly avoid the old
-  first-token-match over-exclusion **without** silently re-introducing it elsewhere?
+  256; runs on **both** tags; outputs `salvage_c6_to_c1_{tag}.json`. (`WO_PAIRS` is N=400; C1 acc
+  ≈0.27 instruct / 0.51 base ⇒ ~292 / ~196 wrong candidates, so `n_used ≥ 80` is comfortably
+  achievable absent heavy alignment-guard skipping.) Does the new criterion correctly avoid the old
+  first-token-match over-exclusion **without** silently re-introducing it elsewhere? **Is `n_used ≥ 80`
+  merely reported, or actually gated?** (The bar for this work order: `pos_ctrl < 0.5` must STOP;
+  `n_used < 80` must at minimum emit a loud WARNING / set an `*_ok` flag — verify which the code does.)
+- **Net vs absolute flip-rate:** is the flip counted **net of the unpatched baseline**? Check whether
+  the flip loop excludes examples whose *unpatched* C1 argmax was already `correct_first` (the code
+  tracks `n_unpatched_correct` / `unpatched_argmax_correct_rate` but verify the `causally_used` verdict
+  actually subtracts it). An absolute flip-rate inflates the verdict near its threshold.
+- **Magic thresholds:** are all verdict thresholds named constants with a rationale and a test, per the
+  two-tier rule? Specifically flag `causally_used = flip_rate_midlate_max ≥ 0.20` — 0.20 is hard-coded,
+  not a `CFG` knob, and stricter than the spec's "flip-rate ≈ 0" (§3.2/§5.4). Should it be defined
+  relative to `unpatched_rate` / `pos_ctrl` rather than a bare point estimate?
 - **§3.7 decodability baseline:** CV-R² for **B, B·C, C, shuffled-B** at the `)` site. Are the targets
   constructed correctly (especially: is `C` expectedly ≈0 because it is *causally future* at the `)`
   position, and is the shuffled-B null actually a null)?
@@ -132,15 +151,27 @@ Criterion §5.4 is GPU-run-only (`pos_ctrl ≥ 0.5`; `flip_rate_by_layer ≈ 0` 
 judge whether the code is correctly *set up to produce and gate on* those, even though they can't run on CPU.
 
 ### E. Scientific validity (the part a code-only review misses)
-Step back from the code: **is the hardened argument sound?** Specifically —
-- Does a passing positive control + a near-zero experimental flip-rate across the mid-late "consumption
-  zone" genuinely establish *decodable-but-causally-unused*, or is there a confound (e.g. the patch site
-  `)` is upstream of where the product is composed; transplanting a single position can't propagate;
-  the C4 donor encodes position-specific information)?
-- Is "B decodable, B·C/C not, at the `)` site" the right evidence, given the causal mask makes `C`
-  unavailable there anyway? Does that *weaken* or *strengthen* the claim, and is it framed honestly?
+Step back from the code: **is the hardened argument sound?** Audit these in order —
+- **CRITICAL — is the C6→C1 experimental patch a no-op by construction?** The alignment guard requires
+  C1 (`( 0 + B ) * C =`) and C6 (`( 0 + B ) =`) to be token-identical through `)`. Under causal
+  attention, `resid_post[L][')']` is a deterministic function of *only* those identical tokens, so the
+  C6 donor residual at `)` is ≈ the residual **already present** in C1 at `)`. If so, patching one into
+  the other is an **identity operation**, a near-zero flip-rate is **mathematically guaranteed**
+  regardless of whether the model composes, and the causal null carries almost no information. Verify
+  by having the code report the per-layer `‖c6_resid[')'] − c1_resid[')']‖`; if it is ≈0, this is the
+  load-bearing weakness and the entire layer sweep merely re-measures the unpatched output.
+- **Is the positive control too STRONG (tautological) and not site-matched?** It overwrites the
+  final-position late-layer residual — one unembed step from the logits — so it almost always flips and
+  proves only that the hook *writes tensors*. It does **not** prove that an intervention at the
+  experimental `)` site / swept layers can move the output. Is there a **site-matched** positive control
+  (e.g. denoising a clean `)` residual into a B-corrupted C1, the `cells/75` operand-corruption idiom)
+  that would actually license interpreting the experimental null?
+- Is "B decodable, B·C/C not, at the `)` site" honest evidence, given the causal mask makes `C` (and
+  thus `B·C`) unavailable there **by construction**? Does the "B is present where the product is not"
+  framing *overstate* a trivially-true gap?
 - What is the **single strongest objection** a reviewer would raise that this change does **not** yet
-  answer? Name it.
+  answer? Name it, and say whether it is fixable cheaply (e.g. by reusing the validated operand-corruption
+  recovery idiom at the `)` site instead of the identical-prefix transplant).
 
 ### F. Non-regression & determinism invariants
 - `git diff --stat`: only the files in §3 changed; **no** edits to `cells/00`–`75` or the G0..G4 ledger.
@@ -153,7 +184,7 @@ Step back from the code: **is the hardened argument sound?** Specifically —
 ```bash
 cd <repo>
 python3 tests/test_wo_logic.py                                   # must print: ALL PASS
-python3 build_notebook.py cells operator_precedence_phases_0_5.ipynb   # must print: ... (validated JSON)
+python3 build_notebook.py cells operator_precedence_phases_0_5.ipynb   # must print: wrote ... with 30 cells (validated JSON)
 python3 -m py_compile cells/76_wo_logic.py cells/82_wo_downstream.py \
     cells/82a_wo_fewshot.py cells/82b_wo_wrong_output.py cells/82c_wo_confidence.py cells/83_wo_repro.py
 git diff --stat                                                  # confirm change scope

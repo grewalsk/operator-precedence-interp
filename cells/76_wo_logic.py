@@ -597,7 +597,7 @@ def wo_wilson_ci(k, n, alpha=0.05):
     if n is None or int(n) == 0:
         return (None, None)
     n = float(n)
-    k = float(k)
+    k = min(max(float(k), 0.0), n)   # clamp to [0,n] so an out-of-domain k never sqrt(neg).
     z = _wo_stats.NormalDist().inv_cdf(1.0 - alpha / 2.0)
     phat = k / n
     z2 = z * z

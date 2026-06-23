@@ -30,6 +30,9 @@ CFG.setdefault("wo_localize_sample", 8)     # #examples averaged per parse (GPU 
 CFG.setdefault("wo_localize_seed", 101)
 CFG.setdefault("wo_salvage_n", 256)         # WO#2 §3.3: enlarged subset (was 128); decodability
 #                                             needs n >> reduced-dim and the exclusion fix frees it.
+CFG.setdefault("wo_salvage_min_n", 80)              # WO#2 §5.4: warn if usable contrast n < this.
+CFG.setdefault("wo_salvage_recovery_thresh", 0.5)   # recovery >= this => a ')'-site patch demonstrably
+#                                                     moves the output (used for pos-control + "used").
 
 
 # ----------------------------------------------------------------------------
@@ -310,54 +313,80 @@ def _wo_mk_patch_hook(vec_dev, pos):
     return hook
 
 
+def _wo_corrupt_B(B, rng, lo=20, hi=49):
+    """A different operand B' with the SAME digit count as B (keeps token length
+    equal so the ')' index aligns). Corrupting the OPERAND is what makes the ')'
+    residual genuinely DIFFER between the clean and corrupt runs — the fix for the
+    no-op transplant confound (copying an identical-prefix residual was an identity
+    operation, so flip-rate ~ 0 was guaranteed regardless of composition)."""
+    nd = len(str(B))
+    for _ in range(64):
+        Bp = int(rng.integers(lo, hi + 1))
+        if Bp != B and len(str(Bp)) == nd:
+            return Bp
+    return None
+
+
 def _wo_print_salvage(out):
-    print("\n================= WO STEP 5b — C6->C1 SALVAGE (§10.B) =================")
-    print(f"  [{out['tag']}] n_used={out['n_used']} (wrong candidates={out.get('n_wrong_candidates')}, "
-          f"skipped={out['n_skipped']})")
-    print(f"  DECODABILITY @ post-bracket ')' site (CV-R^2, best layer):")
+    print("\n========== WO STEP 5b — DECODABLE-BUT-UNUSED salvage (site-matched) ==========")
+    _warn = "" if out.get("n_used_ok", True) else f"  ⚠ n_used < {out.get('min_n')}"
+    print(f"  [{out['tag']}] n_used={out['n_used']}/{out.get('n_sample_requested')} "
+          f"(C1-wrong cand={out.get('n_wrong_candidates')}, no-B-contrast={out.get('n_no_contrast')}, "
+          f"other skips={out['n_skipped']}){_warn}")
+    print("  DECODABILITY @ post-bracket ')' site (clean C1; CV-R^2 best layer):")
     for tname, d in out.get("decodability_by_target", {}).items():
         print(f"     {tname:<12}: R^2={d.get('cv_r2')} @ layer {d.get('best_layer')}")
-    print(f"  POSITIVE CONTROL (C4 donor -> C1 final @ layer {out.get('pos_ctrl_layer')}): "
-          f"flip-rate={out.get('pos_ctrl_flip_rate')}  (>=0.50 required: "
-          f"{'OK' if out.get('pos_ctrl_ok') else 'FAIL/STOP'})")
-    print(f"  EXPERIMENT (C6 -> C1 ')') flip-to-correct by layer: {out.get('flip_rate_by_layer')}")
-    print(f"     best-decode-layer ({out.get('patch_layer')}) flip={out.get('patch_argmax_flip_rate_to_correct')}; "
-          f"mid-late ({out.get('midlate_layers')}) MAX flip={out.get('flip_rate_midlate_max')}; "
-          f"unpatched-already-correct baseline={out.get('unpatched_argmax_correct_rate')}")
+    print("  POSITIVE CONTROL — same operand-corruption patch at ')' in C6 '( 0 + B ) =' (')' value")
+    print(f"     IS the answer): recovery max={out.get('pos_ctrl_recovery_max')} "
+          f"(flip max={out.get('pos_ctrl_flip_max')})  [site moves output: "
+          f"{'OK' if out.get('pos_ctrl_ok') else 'FAIL -> STOP'}]")
+    print("  EXPERIMENT — same patch at ')' in C1 '( 0 + B ) * C =' (does ')' feed the outer * C?):")
+    print(f"     recovery by layer: {out.get('recovery_by_layer')}")
+    print(f"     mid-late {out.get('midlate_layers')} recovery MAX={out.get('recovery_midlate_max')} "
+          f"flip MAX={out.get('flip_rate_midlate_max')}")
     if out.get("stop"):
         print("  ⛔ STOP: " + out["reading"])
     else:
         print(f"  reading: {out['reading']}")
-    print("======================================================================")
+    print("=============================================================================")
 
 
 @torch.no_grad()
 def _wo_salvage(tag):
-    """§10.B C6->C1 salvage — the causal centerpiece, hardened per Work Order #2.
-    At the post-bracket ')' position of C1 (closing '( 0 + B )', where the bracketed
-    value should feed the outer '* C'):
+    """Decodable-but-causally-unused test — REDESIGNED to fix the no-op confound.
 
-      (1) DECODABILITY (§3.7) — held-out CV-R^2 of a linear probe at the ')' site,
-          for FOUR targets: B (have), the product B*C (what the model should be
-          computing toward), C, and a SHUFFLED-B null control. Expect B high, the
-          rest low — B is present where the product is not.
-      (2) CAUSAL USE (§3.2) — patch C6's resid ('( 0 + B ) = B', correctly
-          evaluated) at the ')' site into C1, SWEPT over a layer set (every other
-          layer ∪ the best-decode layer), reading whether C1's argmax flips to the
-          correct product's first token. Flip-rate ≈ 0 across the mid-late
-          consumption zone => the operand is computed, carried, and discarded.
-      (3) POSITIVE CONTROL (§3.1) — the load-bearing hygiene: patch the C4 donor
-          ('( B * C ) =', evaluated correctly) final-position resid into C1's final
-          position at a late layer. This SHOULD flip C1 to correct (>=0.5); if it
-          does not, the hook cannot move the output and the whole null is suspect
-          (STOP). Reported side-by-side with the experimental flip-rate.
+    WHY THE REDESIGN. The prior test copied C6's ')' residual into C1's ')'. Because
+    the alignment guard forced C1 '( 0 + B ) * C =' and C6 '( 0 + B ) =' to be
+    token-identical through ')', and causal attention makes resid_post[')'] a function
+    of ONLY those identical tokens, the donor == the target: the patch was an IDENTITY
+    operation and flip-rate ~ 0 was guaranteed regardless of composition. We instead
+    use OPERAND-CORRUPTION denoising at the ')' site (the validated G4 /
+    _wo_localize_parse idiom), so donor != target:
 
-    SUBSET (§3.3): keep (B,C) iff C1's full PARSED answer != B*C ("C1 is actually
-    wrong"), read from the in-memory battery correct_mask (index-aligned to
-    WO_PAIRS) — not the old over-strict first-token-mismatch rule that dropped n to
-    33. Runs on BOTH tags (base is cleanest: C6=1.000). The readout TARGET is the
-    correct product's first token (empirical, from C4 — avoids the Llama leading-
-    space pitfall). rp1==rp6 + prefix identity is asserted before transplant."""
+      EXPERIMENT (does the operand at ')' feed the outer '* C'?):
+        clean   = '( 0 + B ) * C ='     -> first token F_clean
+        corrupt = '( 0 + B' ) * C ='    (B' = same #digits) -> F_corr (!= F_clean)
+        Patch the CLEAN ')' residual into the CORRUPTED run at ')'. Recovery of the
+        logit-diff(F_clean - F_corr) at the final position, swept over layers.
+        recovery ~ 0 across the mid-late consumption zone => restoring B at ')' does
+        NOT move C1's output => the operand is decoded-but-causally-unused.
+
+      POSITIVE CONTROL — SITE-MATCHED: the SAME operand-corruption patch at the SAME
+        ')' position, but in C6 '( 0 + B ) =' where the bracketed value IS the answer.
+        Recovery should be HIGH (>= thresh): proof a ')'-site patch CAN move the
+        output. High C6 recovery beside ~0 C1 recovery is the airtight contrast; if
+        C6 also fails, the null is uninterpretable (STOP). (Replaces the old
+        final-position C4 control, which was a tautological mover at a different site.)
+
+      DECODABILITY (§3.7): CV-R^2 of B / B*C / C / shuffled-B from the clean C1 ')'
+        residual. B is high (present); B*C and C are low PARTLY because C is causally
+        future at ')' — so the load-bearing evidence is the experiment-vs-control
+        contrast, not the decodability gap (reported honestly).
+
+    NET BY CONSTRUCTION: clean_first != corrupt_first is required and the corrupt run's
+    UNPATCHED argmax IS corrupt_first, so an unpatched example can never count as a
+    flip — recovery/flip are inherently baseline-netted. Subset = C1-wrong examples
+    (the failing regime). Runs on BOTH tags; checkpointed per layer; resumable."""
     done_key = f"wo_salvage_{tag}"
     deliverable = f"salvage_c6_to_c1_{tag}.json"
     if has_artifact(done_key, "json"):
@@ -369,76 +398,87 @@ def _wo_salvage(tag):
 
     wo_load_model(tag)
     _rmap = dict((c[0], c[2]) for c in WO_CONDITIONS)
-    renderC1, renderC6, renderC4 = _rmap["C1"], _rmap["C6"], _rmap["C4"]
+    renderC1, renderC6 = _rmap["C1"], _rmap["C6"]
     n_layers = model.cfg.n_layers
-    L_pc = int(np.floor(0.75 * n_layers))                 # §3.1 positive-control layer.
+    eps = 1e-8
 
-    # --- §3.3 subset: examples where C1's full parsed answer is WRONG. ----------
+    # --- subset: C1-wrong examples (the failing regime where the claim lives) ---
     res = _wo_battery_res_for_salvage(tag)
     c1_mask = res["C1"]["correct_mask"]
     assert len(c1_mask) == len(WO_PAIRS), (
-        f"salvage[{tag}]: C1 correct_mask (len {len(c1_mask)}) not aligned to "
-        f"WO_PAIRS (len {len(WO_PAIRS)})")
+        f"salvage[{tag}]: C1 correct_mask (len {len(c1_mask)}) not aligned to WO_PAIRS")
     wrong_idx = [i for i in range(len(WO_PAIRS)) if not c1_mask[i]]
     n_req = min(len(wrong_idx), int(CFG["wo_salvage_n"]))
     rng = np.random.default_rng(int(CFG["wo_localize_seed"]) + 2)
     sel = rng.choice(len(wrong_idx), size=n_req, replace=False) if n_req > 0 else []
-    sample_idx = sorted(int(wrong_idx[int(i)]) for i in sel)
-    sample = [WO_PAIRS[i] for i in sample_idx]
-    log(f"WO salvage[{tag}]: {len(wrong_idx)} C1-wrong candidates; sampling {n_req} "
-        f"(seed {int(CFG['wo_localize_seed']) + 2}).")
+    sample = [WO_PAIRS[int(wrong_idx[int(i)])] for i in sel]
+    log(f"WO salvage[{tag}]: {len(wrong_idx)} C1-wrong candidates; sampling {n_req}.")
 
     def _rparen_pos(tokens):
         toks = [tokenizer.decode([t]).strip() for t in tokens[0].tolist()]
         for i, t in enumerate(toks):
-            if t == ")":          # first ')' closes '( 0 + B )' in both C1 and C6.
+            if t == ")":          # first ')' closes '( 0 + B )' in C1 and C6.
                 return i
         return None
 
-    # --- collection loop: gather per-example activations + scalars -------------
+    def _ld(logits, a, b):
+        return _wo_first_tok_logit(logits, -1, a) - _wo_first_tok_logit(logits, -1, b)
+
+    def _collect(render, B, Bp, C):
+        """Operand-corruption setup at the ')' site for one (render, B, B', C).
+        Returns the corrupt tokens, the ')' index, clean/corrupt first tokens +
+        logit-diffs, and the CLEAN ')' residual per layer (fp16 CPU). The string
+        'no_contrast' if F_clean == F_corr; None if otherwise unusable."""
+        clean_tok = model.to_tokens(render(B, C))
+        corrupt_tok = model.to_tokens(render(Bp, C))
+        if clean_tok.shape != corrupt_tok.shape:
+            return None
+        rp, rpc = _rparen_pos(clean_tok), _rparen_pos(corrupt_tok)
+        if rp is None or rp != rpc:
+            return None
+        clean_logits, clean_cache = model.run_with_cache(
+            clean_tok, names_filter=lambda nm: nm.endswith("hook_resid_post"))
+        corrupt_logits = model(corrupt_tok)
+        clean_first = int(clean_logits[0, -1].argmax().item())
+        corrupt_first = int(corrupt_logits[0, -1].argmax().item())
+        if clean_first == corrupt_first:
+            return "no_contrast"
+        ld_clean = _ld(clean_logits, clean_first, corrupt_first)
+        ld_corrupt = _ld(corrupt_logits, clean_first, corrupt_first)
+        if not (ld_clean > ld_corrupt):
+            return None      # metric sign wrong for this example -> skip.
+        clean_resid = [clean_cache[f"blocks.{L}.hook_resid_post"][0, rp, :].half().cpu()
+                       for L in range(n_layers)]
+        return {"corrupt_tok": corrupt_tok, "rp": int(rp),
+                "clean_first": clean_first, "corrupt_first": corrupt_first,
+                "ld_clean": float(ld_clean), "ld_corrupt": float(ld_corrupt),
+                "clean_resid": clean_resid}
+
+    # --- Phase A: collect PAIRED C1 (experiment) + C6 (site-matched control) ----
     feats = {L: [] for L in range(n_layers)}
     Bvals, Cvals = [], []
-    examples = []   # dicts: c1_tok, rp1, c1_final, correct_first, base_correct, c6_vecs, c4_pc_vec
+    exp_ex, ctrl_ex = [], []
     n_skip = 0
-    n_unpatched_correct = 0
+    n_no_contrast = 0
     for (B, C) in sample:
-        c1_tok = model.to_tokens(renderC1(B, C))
-        c6_tok = model.to_tokens(renderC6(B, C))
-        rp1, rp6 = _rparen_pos(c1_tok), _rparen_pos(c6_tok)
-        if rp1 is None or rp6 is None:
+        Bp = _wo_corrupt_B(B, rng, *WO_BAND)
+        if Bp is None:
             n_skip += 1; continue
-        # alignment guard: same ')' index AND token-identical '( 0 + B )' prefix.
-        if rp1 != rp6 or c1_tok[0, :rp1 + 1].tolist() != c6_tok[0, :rp6 + 1].tolist():
+        c1 = _collect(renderC1, B, Bp, C)
+        if c1 == "no_contrast":
+            n_no_contrast += 1; continue
+        if c1 is None:
             n_skip += 1; continue
-        # correct first answer-token = what the model emits for the correctly-
-        # composed product (C4 '( B * C ) ='), derived EMPIRICALLY; we also grab
-        # C4's final-position resid @ L_pc as the positive-control donor.
-        c4_tok = model.to_tokens(renderC4(B, C))
-        c4_logits, c4_cache = model.run_with_cache(
-            c4_tok, names_filter=lambda nm: nm.endswith("hook_resid_post"))
-        correct_first = int(c4_logits[0, -1].argmax().item())
-        c4_pc_vec = c4_cache[f"blocks.{L_pc}.hook_resid_post"][0, -1, :].half().cpu()
-
-        c1_logits, c1_cache = model.run_with_cache(
-            c1_tok, names_filter=lambda nm: nm.endswith("hook_resid_post"))
-        _, c6_cache = model.run_with_cache(
-            c6_tok, names_filter=lambda nm: nm.endswith("hook_resid_post"))
-
+        c6 = _collect(renderC6, B, Bp, C)
+        if c6 == "no_contrast" or c6 is None:
+            n_skip += 1; continue        # require BOTH so experiment & control share examples.
         for L in range(n_layers):
-            feats[L].append(c1_cache[f"blocks.{L}.hook_resid_post"][0, rp1, :].float().cpu().numpy())
+            feats[L].append(c1["clean_resid"][L].float().numpy())
         Bvals.append(int(B)); Cvals.append(int(C))
-        base_correct = _wo_first_tok_logit(c1_logits, -1, correct_first)
-        if int(c1_logits[0, -1].argmax().item()) == correct_first:
-            n_unpatched_correct += 1   # C1's first token already right (full answer still wrong).
-        c6_vecs = [c6_cache[f"blocks.{L}.hook_resid_post"][0, rp6, :].half().cpu()
-                   for L in range(n_layers)]   # keep on CPU (fp16) to bound GPU memory.
-        examples.append({"c1_tok": c1_tok, "rp1": int(rp1), "c1_final": int(c1_tok.shape[1] - 1),
-                         "correct_first": int(correct_first), "base_correct": float(base_correct),
-                         "c6_vecs": c6_vecs, "c4_pc_vec": c4_pc_vec})
-
+        exp_ex.append(c1); ctrl_ex.append(c6)
     n_used = len(Bvals)
 
-    # --- (1) decodability for FOUR targets (§3.7); pure wo_cv_r2 -------------
+    # --- decodability for FOUR targets (§3.7) from the clean C1 ')' residual -----
     Bv = np.array(Bvals, dtype=float); Cv = np.array(Cvals, dtype=float)
     prods = Bv * Cv
     shuf = wo_shuffle_control(Bv, seed=int(CFG["wo_localize_seed"]) + 3)
@@ -464,118 +504,125 @@ def _wo_salvage(tag):
     best_layer = decodability_by_target["B"]["best_layer"]
     r2_best = decodability_by_target["B"]["cv_r2"]
 
-    # --- (2) experimental C6->C1 patch, SWEPT over layers (§3.2); checkpointed --
-    flip_by_L, delta_by_L = {}, {}
-    pos_ctrl_flip_rate = None
+    # --- Phase B: layer-swept recovery for experiment (C1) + control (C6) -------
+    L_sweep = sorted(set(range(0, n_layers, 2)) | ({best_layer} if best_layer is not None else set()))
     sweep_ck = f"wo_salvage_sweep_{tag}"
+    exp_rec, exp_flip, pos_rec, pos_flip = {}, {}, {}, {}
     if has_artifact(sweep_ck, "json"):
         prev = load_json(sweep_ck)
         if prev.get("best_layer") == best_layer and prev.get("n") == n_used:
-            flip_by_L = {int(k): v for k, v in prev.get("flip", {}).items()}
-            delta_by_L = {int(k): v for k, v in prev.get("delta", {}).items()}
-            pos_ctrl_flip_rate = prev.get("pos_ctrl")
-            log(f"WO salvage[{tag}]: resuming sweep ({len(flip_by_L)} layers done, "
-                f"pos_ctrl={'done' if pos_ctrl_flip_rate is not None else 'pending'}).")
+            exp_rec = {int(k): v for k, v in prev.get("exp_rec", {}).items()}
+            exp_flip = {int(k): v for k, v in prev.get("exp_flip", {}).items()}
+            pos_rec = {int(k): v for k, v in prev.get("pos_rec", {}).items()}
+            pos_flip = {int(k): v for k, v in prev.get("pos_flip", {}).items()}
+            log(f"WO salvage[{tag}]: resuming sweep ({len(exp_rec)}/{len(L_sweep)} layers done).")
         else:
             log(f"WO salvage[{tag}]: stale sweep checkpoint (best_layer/n changed) — recomputing.")
 
     def _save_sweep():
-        save_json(sweep_ck, {"flip": {str(k): v for k, v in flip_by_L.items()},
-                             "delta": {str(k): v for k, v in delta_by_L.items()},
-                             "pos_ctrl": pos_ctrl_flip_rate,
+        save_json(sweep_ck, {"exp_rec": {str(k): v for k, v in exp_rec.items()},
+                             "exp_flip": {str(k): v for k, v in exp_flip.items()},
+                             "pos_rec": {str(k): v for k, v in pos_rec.items()},
+                             "pos_flip": {str(k): v for k, v in pos_flip.items()},
                              "best_layer": best_layer, "n": n_used})
 
-    if best_layer is not None and n_used > 0:
-        L_sweep = sorted(set(range(0, n_layers, 2)) | {best_layer})
-        for L in L_sweep:
-            if L in flip_by_L:
-                continue
-            flips, deltas = [], []
-            for ex in examples:
-                c6_dev = ex["c6_vecs"][L].to(model.cfg.device)
-                patched = model.run_with_hooks(
-                    ex["c1_tok"],
-                    fwd_hooks=[(f"blocks.{L}.hook_resid_post", _wo_mk_patch_hook(c6_dev, ex["rp1"]))])
-                flips.append(1.0 if int(patched[0, -1].argmax().item()) == ex["correct_first"] else 0.0)
-                deltas.append(_wo_first_tok_logit(patched, -1, ex["correct_first"]) - ex["base_correct"])
-            flip_by_L[L] = float(np.mean(flips)); delta_by_L[L] = float(np.mean(deltas))
-            _save_sweep()                                   # checkpoint per layer (disconnect-safe)
-            log(f"WO salvage[{tag}]: swept layer {L}/{n_layers - 1} flip={flip_by_L[L]:.3f}")
+    def _patch_recovery(ex, L):
+        vec = ex["clean_resid"][L].to(model.cfg.device)
+        patched = model.run_with_hooks(
+            ex["corrupt_tok"],
+            fwd_hooks=[(f"blocks.{L}.hook_resid_post", _wo_mk_patch_hook(vec, ex["rp"]))])
+        ld_p = _ld(patched, ex["clean_first"], ex["corrupt_first"])
+        rec = (ld_p - ex["ld_corrupt"]) / (ex["ld_clean"] - ex["ld_corrupt"] + eps)
+        flip = 1.0 if int(patched[0, -1].argmax().item()) == ex["clean_first"] else 0.0
+        return rec, flip
 
-        # --- (3) positive control (§3.1): C4 final-pos donor -> C1 final @ L_pc --
-        if pos_ctrl_flip_rate is None:
-            pc_flips = []
-            for ex in examples:
-                c4_dev = ex["c4_pc_vec"].to(model.cfg.device)
-                patched = model.run_with_hooks(
-                    ex["c1_tok"],
-                    fwd_hooks=[(f"blocks.{L_pc}.hook_resid_post", _wo_mk_patch_hook(c4_dev, ex["c1_final"]))])
-                pc_flips.append(1.0 if int(patched[0, -1].argmax().item()) == ex["correct_first"] else 0.0)
-            pos_ctrl_flip_rate = float(np.mean(pc_flips)) if pc_flips else None
-            _save_sweep()
-            log(f"WO salvage[{tag}]: positive control flip-rate={pos_ctrl_flip_rate}")
+    def _avg_layer(examples, L):
+        rs = [_patch_recovery(ex, L) for ex in examples]
+        return float(np.mean([r for r, _ in rs])), float(np.mean([f for _, f in rs]))
+
+    if best_layer is not None and n_used > 0:
+        for L in L_sweep:
+            if L in exp_rec and L in pos_rec:
+                continue
+            if L not in exp_rec:
+                exp_rec[L], exp_flip[L] = _avg_layer(exp_ex, L)
+            if L not in pos_rec:
+                pos_rec[L], pos_flip[L] = _avg_layer(ctrl_ex, L)
+            _save_sweep()                                   # checkpoint per layer (disconnect-safe)
+            log(f"WO salvage[{tag}]: layer {L}/{n_layers - 1} "
+                f"exp_rec={exp_rec[L]:.3f} pos_rec={pos_rec[L]:.3f}")
 
     # --- derived headline numbers --------------------------------------------
-    flip_rate_by_layer = {str(L): flip_by_L[L] for L in sorted(flip_by_L)}
-    delta_by_layer = {str(L): delta_by_L[L] for L in sorted(delta_by_L)}
+    recovery_by_layer = {str(L): exp_rec[L] for L in sorted(exp_rec)}
+    flip_by_layer = {str(L): exp_flip[L] for L in sorted(exp_flip)}
+    pos_recovery_by_layer = {str(L): pos_rec[L] for L in sorted(pos_rec)}
+    pos_flip_by_layer = {str(L): pos_flip[L] for L in sorted(pos_flip)}
     midlate_lo = int(np.floor(0.6 * n_layers))
-    midlate_layers = [L for L in sorted(flip_by_L) if L >= midlate_lo]
-    flip_rate_midlate_max = max((flip_by_L[L] for L in midlate_layers), default=None)
-    exp_flip = flip_by_L.get(best_layer)
-    exp_delta = delta_by_L.get(best_layer)
-    unpatched_rate = (n_unpatched_correct / n_used) if n_used else None
+    midlate_layers = [L for L in sorted(exp_rec) if L >= midlate_lo]
+    recovery_midlate_max = max((exp_rec[L] for L in midlate_layers), default=None)
+    flip_rate_midlate_max = max((exp_flip[L] for L in midlate_layers), default=None)
+    pos_ctrl_recovery_max = max(pos_rec.values(), default=None)
+    pos_ctrl_flip_max = max(pos_flip.values(), default=None)
 
+    thresh = float(CFG["wo_salvage_recovery_thresh"])
+    n_used_ok = n_used >= int(CFG["wo_salvage_min_n"])
     decodable = (r2_best is not None and r2_best >= 0.5)
-    pos_ctrl_ok = (pos_ctrl_flip_rate is not None and pos_ctrl_flip_rate >= 0.5)
-    causally_used = (flip_rate_midlate_max is not None and flip_rate_midlate_max >= 0.20)
+    pos_ctrl_ok = (pos_ctrl_recovery_max is not None and pos_ctrl_recovery_max >= thresh)
+    causally_used = (recovery_midlate_max is not None and recovery_midlate_max >= thresh)
     stop = (best_layer is not None and n_used > 0 and not pos_ctrl_ok)
 
-    if r2_best is None or n_used == 0:
-        reading = "INCONCLUSIVE: too few usable examples to estimate decodability/causal use."
+    if r2_best is None or n_used == 0 or best_layer is None:
+        reading = "INCONCLUSIVE: too few usable contrast examples to estimate decodability/causal use."
     elif stop:
-        reading = (f"STOP — positive control FAILED (flip-rate={pos_ctrl_flip_rate:.2f} < 0.50). The "
-                   "patching hook cannot move C1's output even with the correctly-evaluated C4 donor, "
-                   "so the experimental null is uninterpretable. Fix the instrument before reporting "
-                   "the salvage (work order §3.1).")
+        reading = (f"STOP — the SITE-MATCHED positive control FAILED: the same operand-corruption patch "
+                   f"at ')' in C6 (where that value IS the answer) only recovers "
+                   f"{pos_ctrl_recovery_max:.2f} (< {thresh:.2f}). A ')'-site patch cannot be shown to "
+                   "move the output, so the C1 null is uninterpretable — fix the instrument first.")
     elif decodable and not causally_used:
-        reading = ("DECODABLE-BUT-UNUSED: B is linearly decodable from C1's post-bracket ')' site "
-                   f"(CV-R^2={r2_best:.2f} @ layer {best_layer}) and the POSITIVE CONTROL moves the "
-                   f"output (C4 donor flip-rate={pos_ctrl_flip_rate:.2f} >= 0.50), yet patching the "
-                   f"correctly-evaluated C6 subexpr at that site flips C1 to the correct product almost "
-                   f"never across the consumption zone (mid-late max flip={flip_rate_midlate_max:.2f}, "
-                   f"best-decode-layer flip={exp_flip:.2f}; unpatched-already-correct baseline="
-                   f"{unpatched_rate:.2f}). The operand is computed, carried, and discarded — "
-                   "decodable-but-not-causally-used, now layer-swept with a passing positive control.")
+        reading = ("DECODABLE-BUT-CAUSALLY-UNUSED (site-matched): B is linearly decodable from C1's "
+                   f"post-bracket ')' residual (CV-R^2={r2_best:.2f} @ layer {best_layer}); the SAME "
+                   f"operand-corruption patch at ')' DOES move the output where that value is used "
+                   f"(C6 control recovery={pos_ctrl_recovery_max:.2f} >= {thresh:.2f}); yet restoring "
+                   f"the clean operand at ')' in C1 does NOT recover the composed output across the "
+                   f"mid-late consumption zone (recovery max={recovery_midlate_max:.2f}, flip max="
+                   f"{flip_rate_midlate_max:.2f}). The operand is decoded at ')' and not consumed by the "
+                   "outer '* C'. (No-op transplant confound removed: donor != target via operand "
+                   "corruption; control is site-matched.)")
     elif decodable and causally_used:
-        reading = (f"USED: B decodable (CV-R^2={r2_best:.2f}) AND the C6 patch recovers the correct "
-                   f"product in the consumption zone (mid-late max flip={flip_rate_midlate_max:.2f} "
-                   f">= 0.20) — the operand is causally consumed at some layer.")
+        reading = (f"USED: B decodable (CV-R^2={r2_best:.2f}) AND restoring the clean operand at ')' "
+                   f"recovers C1's output in the consumption zone (recovery max={recovery_midlate_max:.2f} "
+                   f">= {thresh:.2f}) — the operand at ')' is causally consumed.")
     else:
-        reading = (f"NOT CLEANLY DECODABLE (CV-R^2={r2_best:.2f} < 0.5) at the post-bracket site; the "
-                   "decodable-but-unused test does not apply at this site/layer.")
+        reading = (f"NOT CLEANLY DECODABLE (CV-R^2={r2_best:.2f} < 0.5) at the ')' site; the "
+                   "decodable-but-unused test does not apply here.")
+    if not n_used_ok:
+        reading = f"[WARN n_used={n_used} < {int(CFG['wo_salvage_min_n'])}] " + reading
 
     out = {
-        "tag": tag, "n_used": n_used, "n_skipped": n_skip,
-        "n_wrong_candidates": len(wrong_idx),
-        "n_sample_requested": n_req,
-        "n_unpatched_argmax_already_correct": n_unpatched_correct,
-        "unpatched_argmax_correct_rate": unpatched_rate,
-        # decodability
+        "tag": tag,
+        "design": "operand-corruption denoising at ')' with a site-matched C6 positive control",
+        "n_used": n_used, "n_used_ok": bool(n_used_ok), "min_n": int(CFG["wo_salvage_min_n"]),
+        "n_skipped": n_skip, "n_no_contrast": n_no_contrast,
+        "n_wrong_candidates": len(wrong_idx), "n_sample_requested": n_req,
+        # decodability (clean C1 ')' residual)
         "B_decodable_cv_r2_best": r2_best, "B_decodable_best_layer": best_layer,
         "B_decodable_cv_r2_by_layer": {str(L): v for L, v in decod_B.items()},
         "decodability_by_target": decodability_by_target,
-        # experimental causal patch (swept)
-        "patch_layer": best_layer,
-        "patch_argmax_flip_rate_to_correct": exp_flip,
-        "patch_mean_correct_logit_delta": exp_delta,
-        "flip_rate_by_layer": flip_rate_by_layer,
-        "delta_by_layer": delta_by_layer,
-        "midlate_layers": midlate_layers,
+        # experiment (C1): does restoring B at ')' move the output?
+        "recovery_by_layer": recovery_by_layer,
+        "flip_rate_by_layer": flip_by_layer,
+        "recovery_midlate_max": recovery_midlate_max,
         "flip_rate_midlate_max": flip_rate_midlate_max,
-        # positive control
-        "pos_ctrl_layer": L_pc,
-        "pos_ctrl_flip_rate": pos_ctrl_flip_rate,
+        "midlate_layers": midlate_layers,
+        # positive control (C6, SAME patch where ')' value is the answer)
+        "pos_ctrl_design": "operand-corruption patch at ')' in C6 '( 0 + B ) ='",
+        "pos_ctrl_recovery_by_layer": pos_recovery_by_layer,
+        "pos_ctrl_flip_by_layer": pos_flip_by_layer,
+        "pos_ctrl_recovery_max": pos_ctrl_recovery_max,
+        "pos_ctrl_flip_max": pos_ctrl_flip_max,
+        "pos_ctrl_flip_rate": pos_ctrl_flip_max,   # §4 deliverable key (headline)
         "pos_ctrl_ok": bool(pos_ctrl_ok),
+        "recovery_thresh": thresh,
         # verdict
         "decodable": bool(decodable), "causally_used": bool(causally_used),
         "stop": bool(stop), "reading": reading,

@@ -44,9 +44,12 @@ for _tag in ("base", "instruct"):
             _acc = float(_bat["C1"]["exact_acc"])
             _pf = float(_bat["C1"]["parse_fail_rate"])
         else:
-            _seed = int(CFG["wo_fewshot_seed"]) + _shots
-            _prompts = [wo_fewshot_render(_renderC1, _gtC1, _shots, (B, C), WO_PAIRS, seed=_seed)
-                        for (B, C) in WO_PAIRS]
+            # PER-ITEM demos: seed varies by (shot-count, test index) so each test
+            # prompt draws its own worked examples (a stronger robustness probe than
+            # one fixed demo set shared across all 400 items). Still fully deterministic.
+            _base = int(CFG["wo_fewshot_seed"]) + 1000 * _shots
+            _prompts = [wo_fewshot_render(_renderC1, _gtC1, _shots, (B, C), WO_PAIRS, seed=_base + _i)
+                        for _i, (B, C) in enumerate(WO_PAIRS)]
             _conts = wo_eval(_prompts, f"fewshot_C1_{_shots}shot", _tag)
             _preds = [parse_int(c) for c in _conts]
             _summ = wo_summarize(_preds, _golds)
