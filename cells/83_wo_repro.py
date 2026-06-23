@@ -7,8 +7,17 @@
 import sys
 
 def _ver(m):
+    # some packages (e.g. certain transformer_lens builds) lack __version__ as a
+    # module attribute -> fall back to installed-package metadata.
     try:
-        return __import__(m).__version__
+        v = getattr(__import__(m), "__version__", None)
+        if v:
+            return v
+    except Exception:
+        pass
+    try:
+        import importlib.metadata as _im
+        return _im.version(m)
     except Exception:
         return "n/a"
 

@@ -11,9 +11,24 @@ assert "WO_GATE_EVAL" in globals(), "Run the gates cell (80) first."
 WO_BRANCH = wo_select_branch(WO_GATE_EVAL)
 
 # repro fields surfaced in the record (full repro.txt is written in cell 83).
+def _wo_pkg_ver(mod):
+    """Robust version lookup: some transformer_lens builds don't expose
+    __version__ as a module attribute, so fall back to importlib.metadata."""
+    try:
+        m = __import__(mod)
+        v = getattr(m, "__version__", None)
+        if v:
+            return v
+    except Exception:
+        pass
+    try:
+        import importlib.metadata as _im
+        return _im.version(mod)
+    except Exception:
+        return "n/a"
+
 _repro = {
-    "transformer_lens": (__import__("transformer_lens").__version__
-                         if "transformer_lens" in __import__("sys").modules else "n/a"),
+    "transformer_lens": _wo_pkg_ver("transformer_lens"),
     "model_revision": WO_MODEL_REVISIONS.get("instruct"),
     "prepend_bos": WO_PREPEND_BOS,
     "format": WO_INSTRUCT_FORMAT,
