@@ -58,7 +58,10 @@ _lines.append("")
 _deliverables = [
     "base_2x2.csv", "instruct_battery.csv", "gate_evaluation.json",
     "decision_record.md", "localization_sites.csv", "branchb_controls.csv",
-    "salvage_c6_to_c1.json",
+    # WO#2 causal-hardening deliverables (§4):
+    "salvage_c6_to_c1_instruct.json", "salvage_c6_to_c1_base.json",
+    "confidence_intervals.json", "fewshot_control.csv",
+    "wrong_output_distribution.csv",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:

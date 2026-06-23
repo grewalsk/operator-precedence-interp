@@ -233,6 +233,122 @@ def test_operand_magnitude_bins():
     check("all pairs binned", total == len(pairs))
 
 
+# ------------------------------------------------- WO#2 §3.4 confidence intervals
+def test_bootstrap_ci():
+    import numpy as np
+    boot = WO["wo_bootstrap_ci"]
+    mask = [1] * 30 + [0] * 70           # point estimate 0.30
+    lo, hi = boot(mask, n_boot=2000, seed=0)
+    check("bootstrap CI brackets the point estimate", lo <= 0.30 <= hi)
+    check("bootstrap CI is a proper interval", lo < hi)
+    # deterministic given seed
+    check("bootstrap CI deterministic", boot(mask, n_boot=2000, seed=0) == boot(mask, n_boot=2000, seed=0))
+    # width shrinks ~1/sqrt(n): same proportion (0.5), 100x more samples -> ~10x tighter.
+    small = boot([1] * 25 + [0] * 25, n_boot=2000, seed=1)
+    large = boot([1] * 2500 + [0] * 2500, n_boot=2000, seed=1)
+    w_small, w_large = small[1] - small[0], large[1] - large[0]
+    check("CI width shrinks with n", w_large < w_small)
+    check("CI width shrinks ~1/sqrt(n) (n x100 -> width < 0.3x)", w_large < 0.3 * w_small)
+    check("empty mask -> (None, None)", boot([]) == (None, None))
+
+
+def test_paired_delta_ci():
+    pd = WO["wo_paired_delta_ci"]
+    m = [1, 0, 1, 1, 0, 1, 0, 0]
+    lo, hi = pd(m, m, n_boot=2000, seed=0)
+    check("paired delta of identical masks contains 0", lo <= 0.0 <= hi)
+    check("paired delta of identical masks IS [0,0]", lo == 0.0 and hi == 0.0)
+    n = 40
+    a, b = [1] * n, [0] * n              # disjoint: a always right, b always wrong
+    dlo, dhi = pd(a, b, n_boot=2000, seed=0)
+    check("disjoint masks: delta CI excludes 0", dlo > 0.0)
+    check("disjoint masks: delta ~ 1.0", abs(dlo - 1.0) < 1e-9 and abs(dhi - 1.0) < 1e-9)
+    check("paired delta deterministic", pd(m, a[:8], n_boot=1000, seed=3) == pd(m, a[:8], n_boot=1000, seed=3))
+    check("length mismatch -> (None, None)", pd([1, 0], [1, 0, 1]) == (None, None))
+
+
+def test_wilson_ci():
+    w = WO["wo_wilson_ci"]
+    lo, hi = w(27, 400)
+    check("wilson(27,400) lo ~ 0.047", abs(lo - 0.047) < 0.003)
+    check("wilson(27,400) hi ~ 0.097", abs(hi - 0.097) < 0.003)
+    check("wilson brackets phat=27/400", lo <= 27 / 400 <= hi)
+    check("wilson n=0 -> (None,None)", w(0, 0) == (None, None))
+    lo0, hi0 = w(0, 100)
+    check("wilson k=0 lo clamped to ~0 (non-negative)", 0.0 <= lo0 < 1e-6 and hi0 > 0.0)
+    lon, hin = w(100, 100)
+    check("wilson k=n hi clamped to 1", hin == 1.0 and lon < 1.0)
+
+
+# ------------------------------------------------- WO#2 §3.6 output classifier
+def test_classify_wrong_output():
+    cl = WO["wo_classify_wrong_output"]
+    B, C = 23, 47                        # B*C=1081, B+C=70, all distinct
+    check("pred==B*C -> correct", cl(B * C, B, C) == "correct")
+    check("pred==B -> equals_B", cl(B, B, C) == "equals_B")
+    check("pred==C -> equals_C", cl(C, B, C) == "equals_C")
+    check("pred==B+C -> equals_B_plus_C", cl(B + C, B, C) == "equals_B_plus_C")
+    check("pred==None -> parse_fail", cl(None, B, C) == "parse_fail")
+    check("pred unrelated -> other", cl(99999, B, C) == "other")
+    # tie-breaking by the listed priority order (correct > equals_B > ...).
+    check("tie B==C, pred==B -> equals_B (not equals_C)", cl(2, 2, 2) == "equals_B")
+    check("tie B*C==B+C, pred==4 -> correct (not equals_B_plus_C)", cl(4, 2, 2) == "correct")
+
+
+# ------------------------------------------------- WO#2 §3.5 few-shot prompt builder
+def test_fewshot_render():
+    import re
+    fr = WO["wo_fewshot_render"]
+    rend = {c[0]: c[2] for c in WO["WO_CONDITIONS"]}["C1"]
+    gt = {c[0]: c[3] for c in WO["WO_CONDITIONS"]}["C1"]
+    pool = WO["wo_build_pairs"]()
+    test_pair = pool[0]
+    # 0-shot is exactly the bare test prompt (ends at '=', no trailing space).
+    p0 = fr(rend, gt, 0, test_pair, pool, seed=0)
+    check("0-shot == bare test prompt", p0 == rend(*test_pair))
+    check("prompt has no trailing space", not p0.endswith(" "))
+    # k-shot: k worked examples + the test prompt.
+    p4 = fr(rend, gt, 4, test_pair, pool, seed=0)
+    lines = p4.splitlines()
+    check("4-shot has 5 lines (4 shots + test)", len(lines) == 5)
+    check("4-shot last line == bare test prompt", lines[-1] == rend(*test_pair))
+    # every shot line is well-formed AND its answer == b*c (correct worked example).
+    shot_pairs = []
+    ok_fmt = True
+    for ln in lines[:-1]:
+        m = re.match(r"^\( 0 \+ (\d+) \) \* (\d+) = (-?\d+)$", ln)
+        if m is None:
+            ok_fmt = False
+            break
+        b, c, ans = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        ok_fmt = ok_fmt and (ans == b * c)
+        shot_pairs.append((b, c))
+    check("shot lines well-formed with answer==b*c", ok_fmt)
+    check("shots exclude the test pair", all(sp != tuple(test_pair) for sp in shot_pairs))
+    check("shots are distinct from each other", len(set(shot_pairs)) == len(shot_pairs))
+    # deterministic given seed.
+    check("few-shot deterministic", fr(rend, gt, 4, test_pair, pool, 7) == fr(rend, gt, 4, test_pair, pool, 7))
+
+
+# ------------------------------------------------- WO#2 §3.7 shuffled-target control
+def test_shuffle_control_decorrelates():
+    import numpy as np
+    sc = WO["wo_shuffle_control"]
+    cv = WO["wo_cv_r2"]
+    rng = np.random.default_rng(3)
+    n, d = 128, 4096
+    Bvals = rng.integers(20, 50, n).astype(float)
+    X = rng.standard_normal((n, d))
+    for j in range(3):                   # prominently encode B in a few dims
+        X[:, j] = (Bvals - Bvals.mean()) * 2.0 + 0.5 * rng.standard_normal(n)
+    r2_true = cv(X, Bvals)
+    r2_shuf = cv(X, sc(Bvals, seed=0))
+    check("shuffled-B target decorrelates (CV-R^2 < 0.3)", r2_shuf is not None and r2_shuf < 0.3)
+    check("true B decodes far better than shuffled", r2_true - r2_shuf > 0.3)
+    check("shuffle actually permutes (seeded)", not np.array_equal(sc(Bvals, 0), Bvals))
+    check("shuffle deterministic given seed", np.array_equal(sc(Bvals, 5), sc(Bvals, 5)))
+
+
 def main():
     for fn in sorted(g for g in globals() if g.startswith("test_")):
         print(f"\n{fn}:")

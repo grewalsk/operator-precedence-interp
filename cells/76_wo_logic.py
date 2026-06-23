@@ -538,6 +538,128 @@ def wo_decision_record_md(model_tag, gate_eval, branch, battery_summary,
 
 
 # ----------------------------------------------------------------------------
+# 8b) WORK ORDER #2 — causal-claim hardening pure logic. Forward-pass-FREE math
+#     for: bootstrap / Wilson confidence intervals (§3.4), the "what did C1 emit
+#     instead" classifier (§3.6), the few-shot prompt builder (pure part of §3.5),
+#     and the decodability NULL-control target (pure part of §3.7). Each is unit-
+#     tested in tests/test_wo_logic.py BEFORE any A100 time; the GPU cells (82*)
+#     are thin orchestration over these verified functions. All RNG is seeded
+#     (np.random.default_rng) so every CI / draw is reproducible (work order §6).
+# ----------------------------------------------------------------------------
+import statistics as _wo_stats
+
+
+def wo_bootstrap_ci(mask, n_boot=10000, alpha=0.05, seed=0):
+    """Percentile bootstrap CI for the mean of a 0/1 mask (e.g. an accuracy).
+    Resamples WITH replacement n_boot times and returns the central (1-alpha)
+    percentile interval (lo, hi). Deterministic given `seed`. (None, None) on an
+    empty mask. WHY bootstrap (not just Wilson): the headline numbers are means of
+    correlated per-item correctness, and the same machinery gives the PAIRED delta
+    CI below; the closed-form wo_wilson_ci is provided too as a cross-check."""
+    arr = np.asarray(mask, dtype=float).ravel()
+    n = arr.size
+    if n == 0:
+        return (None, None)
+    rng = np.random.default_rng(int(seed))
+    idx = rng.integers(0, n, size=(int(n_boot), n))
+    means = arr[idx].mean(axis=1)
+    lo = float(np.percentile(means, 100.0 * (alpha / 2.0)))
+    hi = float(np.percentile(means, 100.0 * (1.0 - alpha / 2.0)))
+    return (lo, hi)
+
+
+def wo_paired_delta_ci(mask_a, mask_b, n_boot=10000, alpha=0.05, seed=0):
+    """Percentile bootstrap CI for mean(a) - mean(b) where a, b are index-ALIGNED
+    0/1 masks (the SAME items evaluated under two conditions, e.g. C4 vs C1 on the
+    shared pairs). Resamples ONE set of bootstrap indices and applies it to BOTH
+    masks (paired bootstrap), so the per-item pairing is preserved and the CI is
+    tighter/correct vs. resampling the two independently. Deterministic.
+    (None, None) if lengths differ or empty."""
+    a = np.asarray(mask_a, dtype=float).ravel()
+    b = np.asarray(mask_b, dtype=float).ravel()
+    n = a.size
+    if n == 0 or b.size != n:
+        return (None, None)
+    rng = np.random.default_rng(int(seed))
+    idx = rng.integers(0, n, size=(int(n_boot), n))
+    deltas = a[idx].mean(axis=1) - b[idx].mean(axis=1)
+    lo = float(np.percentile(deltas, 100.0 * (alpha / 2.0)))
+    hi = float(np.percentile(deltas, 100.0 * (1.0 - alpha / 2.0)))
+    return (lo, hi)
+
+
+def wo_wilson_ci(k, n, alpha=0.05):
+    """Closed-form Wilson score interval for a binomial proportion k/n (NO RNG).
+    More accurate than the normal approximation at extreme p / small n, and a
+    deterministic cross-check on the bootstrap. z from the stdlib normal quantile
+    (statistics.NormalDist) so cell 76 keeps its numpy/json/stdlib-only contract.
+    (None, None) if n == 0. Verified: wo_wilson_ci(27, 400) ~ (0.047, 0.097)."""
+    if n is None or int(n) == 0:
+        return (None, None)
+    n = float(n)
+    k = float(k)
+    z = _wo_stats.NormalDist().inv_cdf(1.0 - alpha / 2.0)
+    phat = k / n
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    center = (phat + z2 / (2.0 * n)) / denom
+    half = (z / denom) * math.sqrt(phat * (1.0 - phat) / n + z2 / (4.0 * n * n))
+    return (max(0.0, center - half), min(1.0, center + half))
+
+
+def wo_classify_wrong_output(pred, B, C):
+    """Bucket C1's PARSED prediction into one diagnostic category (§3.6), so the
+    failure mode is legible ('does it return B? C? B+C? garbage?'). Priority order
+    (ties resolved top-down, as the work order lists them):
+        correct (==B*C) > equals_B > equals_C > equals_B_plus_C > parse_fail > other
+    parse_fail (pred is None) is detected first because None equals nothing."""
+    if pred is None:
+        return "parse_fail"
+    if pred == B * C:
+        return "correct"
+    if pred == B:
+        return "equals_B"
+    if pred == C:
+        return "equals_C"
+    if pred == B + C:
+        return "equals_B_plus_C"
+    return "other"
+
+
+def wo_fewshot_render(render, gt, shots, test_pair, pool, seed=0):
+    """Few-shot prompt for the SAME surface as `render` (pure part of §3.5).
+    Prepends `shots` worked examples 'render(b,c) <gt(b,c)>' (one per line), the
+    operands (b,c) drawn deterministically (seeded) from `pool` EXCLUDING the test
+    pair, then appends the bare test prompt render(*test_pair). Returns the full
+    prompt string. It ends at '=' with NO trailing space — the Llama tiktoken
+    pitfall cell 75 documents (a trailing space becomes its own token and shifts
+    the scored next-token id). Deterministic given `seed`; shots are guaranteed
+    distinct from each other (replace=False) and from the test pair (excluded)."""
+    B, C = int(test_pair[0]), int(test_pair[1])
+    cand = [(int(b), int(c)) for (b, c) in pool if (int(b), int(c)) != (B, C)]
+    chosen = []
+    s = int(shots)
+    if s > 0 and cand:
+        rng = np.random.default_rng(int(seed))
+        sel = rng.choice(len(cand), size=min(s, len(cand)), replace=False)
+        chosen = [cand[int(i)] for i in sel]
+    lines = [f"{render(b, c)} {gt(b, c)}" for (b, c) in chosen]
+    lines.append(render(B, C))
+    return "\n".join(lines)
+
+
+def wo_shuffle_control(values, seed=0):
+    """Deterministic permutation of `values` for a decodability NULL control
+    (pure part of §3.7): pairing the SAME activations with a SHUFFLED target must
+    collapse CV-R^2 to ~0, certifying that a high CV-R^2 for the true target is
+    signal and not an artifact of the probe / dimensionality. Returns a numpy
+    array; deterministic given `seed`."""
+    v = np.asarray(values)
+    rng = np.random.default_rng(int(seed))
+    return v[rng.permutation(v.shape[0])]
+
+
+# ----------------------------------------------------------------------------
 # 9) Inline self-test (runs on every notebook execution; CPU only, ~instant).
 #    Mirrors tests/test_wo_logic.py so a notebook run also fails loudly if the
 #    decision logic is wrong. Uses the PUBLISHED base numbers as fixtures.
@@ -577,6 +699,30 @@ def _wo_selftest():
     assert abs(s["exact_acc"] - 0.5) < 1e-9 and abs(s["parse_fail_rate"] - 0.25) < 1e-9
     assert abs(wo_jaccard([1, 1, 0], [1, 0, 0]) - 0.5) < 1e-9
     assert abs(wo_recovery(0.5, 0.0, 1.0) - 0.5) < 1e-6
+
+    # WO#2 causal-hardening pure logic (§3.4/§3.6 + pure parts of §3.5/§3.7).
+    _lo, _hi = wo_bootstrap_ci([1] * 30 + [0] * 70, n_boot=1000, seed=0)
+    assert _lo <= 0.30 <= _hi, (_lo, _hi)
+    _dlo, _dhi = wo_paired_delta_ci([1, 0, 1, 0], [1, 0, 1, 0], n_boot=500, seed=0)
+    assert _dlo <= 0.0 <= _dhi, (_dlo, _dhi)
+    _wlo, _whi = wo_wilson_ci(27, 400)
+    assert abs(_wlo - 0.047) < 0.003 and abs(_whi - 0.097) < 0.003, (_wlo, _whi)
+    assert wo_classify_wrong_output(23 * 47, 23, 47) == "correct"
+    assert wo_classify_wrong_output(23, 23, 47) == "equals_B"
+    assert wo_classify_wrong_output(47, 23, 47) == "equals_C"
+    assert wo_classify_wrong_output(70, 23, 47) == "equals_B_plus_C"
+    assert wo_classify_wrong_output(None, 2, 3) == "parse_fail"
+    assert wo_classify_wrong_output(99999, 23, 47) == "other"
+    _rC1 = dict((c[0], c[2]) for c in WO_CONDITIONS)["C1"]
+    _gC1 = dict((c[0], c[3]) for c in WO_CONDITIONS)["C1"]
+    _pool = [(20, 21), (22, 23), (24, 25), (26, 27), (28, 29)]
+    assert wo_fewshot_render(_rC1, _gC1, 0, (20, 21), _pool) == _rC1(20, 21)
+    _fs = wo_fewshot_render(_rC1, _gC1, 2, (20, 21), _pool, seed=1)
+    assert len(_fs.splitlines()) == 3 and _fs.splitlines()[-1] == _rC1(20, 21)
+    assert wo_fewshot_render(_rC1, _gC1, 2, (20, 21), _pool, 1) == \
+        wo_fewshot_render(_rC1, _gC1, 2, (20, 21), _pool, 1)
+    assert not np.array_equal(
+        wo_shuffle_control(np.arange(50), 0), np.arange(50))
     return True
 
 
