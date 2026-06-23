@@ -1,0 +1,48 @@
+# repro — operator-precedence Instruct re-run + surface/compose disentangling
+
+seed                 : 0
+operand band         : (20, 49)  (FIXED — comparability with Phase 3.5 base)
+N (shared pairs)     : 400
+pairs sha1           : db4da1e0b8516c18e8afca479e7c437095d266cf
+prepend_bos          : True  (inherited from G4/Phase-0 pipeline)
+greedy max_new_tokens: 8  (effective value used by _eval_prompts; §5 target K=8)
+gated Instruct format: bare-continuation
+
+models:
+  base     : meta-llama/Llama-3.1-8B  (revision=d04e592bb4f6aa9cfee91e2e20afa771667e1d4b)
+  instruct : meta-llama/Llama-3.1-8B-Instruct  (revision=0e9e39f249a16976918f6564b8830bc894c89659)
+
+versions:
+  transformer_lens : 3.3.0
+  torch            : 2.11.0+cu128
+  transformers     : 5.12.0
+  numpy            : 2.0.2
+  python           : 3.12.13
+  using_fallback   : False
+
+condition surfaces (rendered for B=23,C=47):
+  C0  baseline_mult        23 * 47 =              -> gt 1081
+  C1  depth_left           ( 0 + 23 ) * 47 =      -> gt 1081
+  C2  depth_right          ( 0 + 23 * 47 ) =      -> gt 1081
+  C3  parens_only_out      ( 23 ) * 47 =          -> gt 1081
+  C4  parens_only_in       ( 23 * 47 ) =          -> gt 1081
+  C5  identity_no_paren    0 + 23 * 47 =          -> gt 1081
+  C6  subexpr_alone        ( 0 + 23 ) =           -> gt 23
+  C7  format_variant       (0+23)*47=             -> gt 1081
+  C8  nospace_in_bracket   (23*47)=               -> gt 1081
+
+branch selected      : NO_REPAIR
+localization verdict : INVALID
+base 2x2 verdict     : COMPOSE_SPECIFIC
+
+deliverables produced (ART/results):
+  [x] base_2x2.csv
+  [x] instruct_battery.csv
+  [x] gate_evaluation.json
+  [x] decision_record.md
+  [ ] localization_sites.csv
+  [x] branchb_controls.csv
+  [x] salvage_c6_to_c1.json
+
+# Reproduce: open the notebook, set HF_TOKEN, Run All. All forward passes are
+# cached per (model-tag, condition) under ART; a fresh runtime resumes from disk.

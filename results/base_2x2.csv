@@ -1,0 +1,10 @@
+axis_surface,axis_compose,cond,surface,acc,corr,parse_fail
+spaces,inside_bracket,C4,( B * C ) =,0.89,0.960359,0
+spaces,outer_compose,C1,( 0 + B ) * C =,0.507,0.0604157,0
+nospace,inside_bracket,C8,(B*C)=,0.765,0.994228,0
+nospace,outer_compose,C7,(0+B)*C=,0.018,-0.052901,0
+
+# verdict,COMPOSE_SPECIFIC
+# headline,"ONE headline: collapse is compose-specific. No-space inside-bracket (B*C)= survives, so C7's collapse is NOT a clean second axis — fold surface fragility into the composition story."
+# new_cell_C8_acc,0.7650  (C7=0.0180, C4=0.8900, survive>=0.7, collapse<=C7+0.15)
+# source: transcribed from the verified A100 run 2026-06-22 (authoritative file on Drive)
