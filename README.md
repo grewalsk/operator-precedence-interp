@@ -14,6 +14,19 @@ A single **GPU‑resumable** Jupyter notebook that decides whether the operator�
 
 **PLAUSIBLE iff G0–G4 all pass.** G2 + G3 decide whether the *science* is sound; G4 whether you can trust your own measurements.
 
+## Status & results (base Llama-3.1-8B, 2026-06-23)
+
+**Tooling sound; G3 is a finding, not a bug.** Full write-up + state checkpoint: **[RESULTS.md](RESULTS.md)**.
+
+| G0 | G1 | G2 | G3 | G4 |
+|----|----|----|----|----|
+| ✅ | ✅ (manual) | ✅ | **❌ (the finding)** | ✅ |
+
+- **G0/G2/G4 green** — the instrument works (loads+hooks, controlled token-identical stimulus, patching reproduces the known addition localization @ layer 30).
+- **G3 red is the result:** base Llama does **not** treat `( 0 + B ) * C` like `B * C`. The Phase 3.5 control battery localizes it to a **composition asymmetry** — multiplication *inside* a bracket is fine (`( B * C )`=0.89) but multiplying a bracketed value *by* an operand fails (`( B ) * C`=0.49; it computes `( 0 + B )` perfectly at 1.00 then fails the outer `* C`) — plus **severe surface/tokenization fragility** (no-spaces → 0.02).
+- **Verdict:** base Llama-3.1-8B is **not a clean substrate for precedence *localization*** (the two parses differ in difficulty, Δ=0.20). The feasibility harness caught this *before* any expensive probing.
+- **One decision pending** (see [docs/decision_prompt.md](docs/decision_prompt.md)): **A** run `-Instruct`, **B** pivot to the brittleness/composition paper, or **C** redesign the contrast. Novel patching (Phases 6–9) stays gated until resolved.
+
 ## The controlled contrast (Factor A)
 
 Token‑identical, additive‑identity (never `×1`), parentheses in both — only the boundary moves:
