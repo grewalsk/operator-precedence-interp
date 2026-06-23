@@ -1,0 +1,13 @@
+tag,category,count,fraction
+base,correct,203,0.5075
+base,equals_B,6,0.015
+base,equals_C,7,0.0175
+base,equals_B_plus_C,0,0
+base,parse_fail,0,0
+base,other,184,0.46
+instruct,correct,106,0.265
+instruct,equals_B,10,0.025
+instruct,equals_C,10,0.025
+instruct,equals_B_plus_C,0,0
+instruct,parse_fail,0,0
+instruct,other,274,0.685

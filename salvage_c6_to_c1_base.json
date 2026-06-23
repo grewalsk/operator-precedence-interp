@@ -1,0 +1,49 @@
+{
+  "tag": "base",
+  "design": "operand-corruption denoising at ')' with a site-matched C6 positive control",
+  "n_used": 0,
+  "n_used_ok": false,
+  "min_n": 80,
+  "n_skipped": 0,
+  "n_no_contrast": 197,
+  "n_wrong_candidates": 197,
+  "n_sample_requested": 197,
+  "B_decodable_cv_r2_best": null,
+  "B_decodable_best_layer": null,
+  "B_decodable_cv_r2_by_layer": {},
+  "decodability_by_target": {
+    "B": {
+      "best_layer": null,
+      "cv_r2": null
+    },
+    "B_times_C": {
+      "best_layer": null,
+      "cv_r2": null
+    },
+    "C": {
+      "best_layer": null,
+      "cv_r2": null
+    },
+    "shuffled_B": {
+      "best_layer": null,
+      "cv_r2": null
+    }
+  },
+  "recovery_by_layer": {},
+  "flip_rate_by_layer": {},
+  "recovery_midlate_max": null,
+  "flip_rate_midlate_max": null,
+  "midlate_layers": [],
+  "pos_ctrl_design": "operand-corruption patch at ')' in C6 '( 0 + B ) ='",
+  "pos_ctrl_recovery_by_layer": {},
+  "pos_ctrl_flip_by_layer": {},
+  "pos_ctrl_recovery_max": null,
+  "pos_ctrl_flip_max": null,
+  "pos_ctrl_flip_rate": null,
+  "pos_ctrl_ok": false,
+  "recovery_thresh": 0.5,
+  "decodable": false,
+  "causally_used": false,
+  "stop": false,
+  "reading": "[WARN n_used=0 < 80] INCONCLUSIVE: too few usable contrast examples to estimate decodability/causal use."
+}

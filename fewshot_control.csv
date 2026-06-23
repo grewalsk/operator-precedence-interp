@@ -1,0 +1,10 @@
+tag,shots,c1_acc,c4_reference,c1_minus_c4,parse_fail,n
+base,0,0.5075,0.89,-0.3825,0,400
+base,2,0.8375,0.89,-0.0525,0,400
+base,4,0.8825,0.89,-0.0075,0,400
+instruct,0,0.265,0.9075,-0.6425,0,400
+instruct,2,0.885,0.9075,-0.0225,0,400
+instruct,4,0.915,0.9075,0.0075,0,400
+
+# verdict,FEWSHOT_FIXES_C1
+# reading,"Few-shot prompting recovers C1 toward C4 — the failure is (partly) a prompting artifact; revisit the claim."
