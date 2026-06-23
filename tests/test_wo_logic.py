@@ -1,0 +1,245 @@
+"""CPU unit tests for the work-order pure-logic cell (cells/76_wo_logic.py).
+
+Exec's the cell in an isolated namespace (with a stub `log`) and exercises the
+six validity gates (§7), the branch tree (§8), the 2x2 verdict (§6), metrics,
+and the recovery math (§10) against the work-order spec and the published base
+numbers. No GPU / no model required.
+
+Run:  python3 tests/test_wo_logic.py     (also importable by pytest)
+"""
+import os
+import sys
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+CELL = os.path.join(HERE, "..", "cells", "76_wo_logic.py")
+
+
+def _load():
+    ns = {"log": lambda *a, **k: None}
+    with open(CELL) as fh:
+        exec(compile(fh.read(), CELL, "exec"), ns)
+    return ns
+
+
+WO = _load()
+_fails = []
+
+
+def check(name, cond):
+    ok = bool(cond)
+    print(f"  [{'PASS' if ok else 'FAIL'}] {name}")
+    if not ok:
+        _fails.append(name)
+
+
+# ---------------------------------------------------------------- stimuli ----
+def test_pairs_deterministic_and_band():
+    p1 = WO["wo_build_pairs"]()
+    p2 = WO["wo_build_pairs"]()
+    check("pairs deterministic", p1 == p2)
+    check("pairs count == N", len(p1) == WO["WO_N"])
+    lo, hi = WO["WO_BAND"]
+    check("all operands in band", all(lo <= B <= hi and lo <= C <= hi for B, C in p1))
+    check("no duplicate pairs", len(set(p1)) == len(p1))
+    check("stim hash stable", WO["wo_stim_hash"](p1) == WO["wo_stim_hash"](p2))
+
+
+def test_condition_surfaces_exact():
+    # surfaces must match work order §2/§6 EXACTLY (spaces matter; C7/C8 have none).
+    rend = {c[0]: c[2] for c in WO["WO_CONDITIONS"]}
+    gt = {c[0]: c[3] for c in WO["WO_CONDITIONS"]}
+    B, C = 23, 47
+    expected = {
+        "C0": "23 * 47 =", "C1": "( 0 + 23 ) * 47 =", "C2": "( 0 + 23 * 47 ) =",
+        "C3": "( 23 ) * 47 =", "C4": "( 23 * 47 ) =", "C5": "0 + 23 * 47 =",
+        "C6": "( 0 + 23 ) =", "C7": "(0+23)*47=", "C8": "(23*47)=",
+    }
+    for k, want in expected.items():
+        check(f"surface {k} exact", rend[k](B, C) == want)
+    check("C6 ground truth is B (not B*C)", gt["C6"](B, C) == B)
+    check("C0 ground truth is B*C", gt["C0"](B, C) == B * C)
+    # 2x2 mapping wired to the right keys.
+    check("2x2 spaces/inside == C4", WO["WO_2X2"][("spaces", "inside")] == "C4")
+    check("2x2 nospace/inside == C8", WO["WO_2X2"][("nospace", "inside")] == "C8")
+    check("2x2 nospace/outer == C7", WO["WO_2X2"][("nospace", "outer")] == "C7")
+
+
+def test_branchb_surfaces():
+    rend = {c[0]: c[2] for c in WO["WO_BRANCHB_CONDITIONS"]}
+    gt = {c[0]: c[3] for c in WO["WO_BRANCHB_CONDITIONS"]}
+    check("A1 add-compose-left surface", rend["A1"](23, 47) == "( 0 + 23 ) + 47 =")
+    check("A2 add-compose-right surface", rend["A2"](23, 47) == "0 + ( 23 + 47 ) =")
+    check("D1 depth-redundant surface", rend["D1"](23, 47) == "( ( 0 + 23 ) ) * 47 =")
+    check("A1 gt is B+C", gt["A1"](23, 47) == 70)
+    check("D1 gt is B*C (same parse as C1)", gt["D1"](23, 47) == 23 * 47)
+
+
+# ---------------------------------------------------------------- metrics ----
+def test_parse_int():
+    p = WO["wo_parse_int"]
+    check("parse leading space + comma", p(" 1,234 rest") == 1234)
+    check("parse plain", p("42") == 42)
+    check("parse failure -> None", p("the answer") is None)
+    check("parse None -> None", p(None) is None)
+    check("parse negative", p("-7x") == -7)
+    check("parse trailing dash stripped", p("12-") == 12)
+
+
+def test_summarize_and_jaccard():
+    s = WO["wo_summarize"]
+    r = s([6, None, 8, 9], [6, 7, 8, 0])
+    check("acc counts parse-fail as wrong", abs(r["exact_acc"] - 0.5) < 1e-9)
+    check("parse_fail_rate", abs(r["parse_fail_rate"] - 0.25) < 1e-9)
+    check("n_parsed excludes None", r["n_parsed"] == 3)
+    # perfectly tracking -> corr ~1
+    rt = s([2, 4, 6, 8], [2, 4, 6, 8])
+    check("corr 1.0 on perfect track", rt["corr"] is not None and rt["corr"] > 0.999)
+    j = WO["wo_jaccard"]
+    check("jaccard half", abs(j([1, 1, 0, 0], [1, 0, 0, 0]) - 0.5) < 1e-9)
+    check("jaccard empty union -> 0", j([0, 0], [0, 0]) == 0.0)
+
+
+def test_recovery_math():
+    rec = WO["wo_recovery"]
+    check("recovery 0 at corrupted", abs(rec(0.0, 0.0, 1.0) - 0.0) < 1e-6)
+    check("recovery 1 at clean", abs(rec(1.0, 0.0, 1.0) - 1.0) < 1e-6)
+    check("recovery 0.5 midway", abs(rec(0.5, 0.0, 1.0) - 0.5) < 1e-6)
+    check("recovery works negative baselines", abs(rec(-1.0, -2.0, 0.0) - 0.5) < 1e-6)
+
+
+def test_cv_r2_not_vacuous_on_noise():
+    # THE regression test for the reviewer-caught bug: in-sample lstsq returns
+    # R^2=1.0 on pure noise at n<<d. wo_cv_r2 (held-out + PCA) must NOT.
+    import numpy as np
+    cv = WO["wo_cv_r2"]
+    rng = np.random.default_rng(7)
+    n, d = 128, 4096
+    Xnoise = rng.standard_normal((n, d))
+    ynoise = rng.standard_normal(n)
+    r2_noise = cv(Xnoise, ynoise)
+    check("CV-R^2 on pure noise is low (<0.3), NOT ~1.0",
+          r2_noise is not None and r2_noise < 0.3)
+    # realistic decodability: the target (an operand value) is PROMINENTLY encoded
+    # in a few directions with real amplitude (as a written-in resid feature would
+    # be), with the rest noise. This is the scenario the salvage probe must recover.
+    Bvals = rng.integers(20, 50, n).astype(float)
+    Xsig = Xnoise.copy()
+    for j in range(3):
+        Xsig[:, j] = (Bvals - Bvals.mean()) * 2.0 + 0.5 * rng.standard_normal(n)
+    r2_signal = cv(Xsig, Bvals)
+    check("CV-R^2 on prominently-encoded signal is high (>0.6)",
+          r2_signal is not None and r2_signal > 0.6)
+    check("CV-R^2 separates signal from noise", r2_signal > r2_noise + 0.3)
+    check("CV-R^2 None on too-few-samples", cv(rng.standard_normal((4, d)), rng.standard_normal(4)) is None)
+
+
+# ---------------------------------------------------------------- gates §7 ----
+def test_gates_on_published_base_numbers():
+    # base RESULTS.md — the gate that the work order says must FAIL pre-Instruct.
+    acc = {"C0": 0.838, "C1": 0.507, "C2": 0.710, "C3": 0.495, "C4": 0.890,
+           "C5": 0.583, "C6": 1.000, "C7": 0.018}
+    corr = {"C1": 0.060, "C2": 0.282}
+    ge = WO["wo_evaluate_gates"](acc, corr, jaccard_c1c2=0.697)
+    g = ge["gates"]
+    check("G_floor fails (acc C0=0.838<0.90)", not g["G_floor"]["pass"])
+    check("G_neutral fails (acc C1=0.507<0.85)", not g["G_neutral"]["pass"])
+    check("G_symmetry fails (|.507-.710|=.203>.05)", not g["G_symmetry"]["pass"])
+    check("G_quantity fails (corr C1=.06<.80)", not g["G_quantity"]["pass"])
+    check("G_surface fails (acc C7=.018<.70)", not g["G_surface"]["pass"])
+    check("G_support fails (jaccard .697<.85)", not g["G_support"]["pass"])
+    check("localization INVALID on base", ge["verdict"] == "INVALID")
+    check("branch NO_REPAIR on base", WO["wo_select_branch"](ge)["branch"] == "NO_REPAIR")
+
+
+def test_gates_boundary_values():
+    # exact-threshold boundaries must PASS (>= / <=).
+    acc = {"C0": 0.90, "C1": 0.85, "C2": 0.80, "C4": 0.90, "C7": 0.70}
+    #   |C1-C4| = 0.05 (<=0.05 pass); |C1-C2| = 0.05 (<=0.05 pass)
+    corr = {"C1": 0.80}
+    ge = WO["wo_evaluate_gates"](acc, corr, jaccard_c1c2=0.85)
+    for k in ["G_floor", "G_neutral", "G_symmetry", "G_quantity", "G_surface", "G_support"]:
+        check(f"{k} passes exactly at threshold", ge["gates"][k]["pass"])
+    check("all-at-threshold -> VALID + CLEAN", ge["localization_valid"]
+          and WO["wo_select_branch"](ge)["branch"] == "CLEAN_REPAIR")
+
+
+def test_gates_neutral_compound():
+    # G_neutral needs BOTH acc(C1)>=0.85 AND |C1-C4|<=0.05.
+    ev = WO["wo_evaluate_gates"]
+    a = {"C0": 0.95, "C1": 0.95, "C2": 0.95, "C4": 0.80, "C7": 0.8}  # |C1-C4|=0.15 -> fail
+    check("G_neutral fails when |C1-C4|>0.05 even if acc high",
+          not ev(a, {"C1": 0.9}, 0.9)["gates"]["G_neutral"]["pass"])
+    b = {"C0": 0.95, "C1": 0.80, "C2": 0.80, "C4": 0.82, "C7": 0.8}  # acc C1=0.80<0.85 -> fail
+    check("G_neutral fails when acc(C1)<0.85 even if |C1-C4| small",
+          not ev(b, {"C1": 0.9}, 0.9)["gates"]["G_neutral"]["pass"])
+
+
+def test_partial_repair_predicted():
+    # work order's PREDICTED outcome: hard gates pass, only G_surface fails.
+    acc = {"C0": 0.95, "C1": 0.88, "C2": 0.86, "C4": 0.89, "C7": 0.30}
+    ge = WO["wo_evaluate_gates"](acc, {"C1": 0.85}, jaccard_c1c2=0.90)
+    check("PARTIAL: localization VALID", ge["localization_valid"])
+    check("PARTIAL: G_surface fails", not ge["g_surface_pass"])
+    check("PARTIAL: scope conditional on spaced", "CONDITIONAL" in ge["scope"])
+    br = WO["wo_select_branch"](ge)
+    check("PARTIAL: branch == PARTIAL_REPAIR", br["branch"] == "PARTIAL_REPAIR")
+    check("PARTIAL: run_on instruct only", br["run_on"] == ["instruct"])
+
+
+def test_floor_failure_surfaced():
+    # G_floor failing routes to NO_REPAIR with the capability caveat surfaced.
+    acc = {"C0": 0.70, "C1": 0.9, "C2": 0.9, "C4": 0.9, "C7": 0.9}
+    ge = WO["wo_evaluate_gates"](acc, {"C1": 0.9}, 0.9)
+    br = WO["wo_select_branch"](ge)
+    check("G_floor fail -> NO_REPAIR", br["branch"] == "NO_REPAIR")
+    check("G_floor fail caveat surfaced", "G_floor" in br["rationale"])
+
+
+# ---------------------------------------------------------------- 2x2 §6 ----
+def test_2x2_verdict():
+    v = WO["wo_2x2_verdict"]
+    check("C8 survives -> compose-specific", v(0.89, 0.018, 0.82)["verdict"] == "COMPOSE_SPECIFIC")
+    check("C8 collapses -> pure tokenization", v(0.89, 0.018, 0.03)["verdict"] == "PURE_TOKENIZATION")
+    check("C8 mid -> ambiguous", v(0.89, 0.018, 0.40)["verdict"] == "AMBIGUOUS")
+
+
+# ---------------------------------------------------------------- builders ----
+def test_csv_and_record_builders():
+    rows = [{"cond": "C0", "acc": 0.838, "note": "a,b"}, {"cond": "C1", "acc": None}]
+    csv = WO["wo_battery_csv"](rows, ["cond", "acc", "note"])
+    check("csv has header", csv.splitlines()[0] == "cond,acc,note")
+    check("csv quotes comma field", '"a,b"' in csv)
+    check("csv None -> empty", csv.splitlines()[2].split(",")[1] == "")
+    # decision record builds without error on the base fixture.
+    acc = {"C0": 0.838, "C1": 0.507, "C2": 0.710, "C4": 0.890, "C7": 0.018}
+    ge = WO["wo_evaluate_gates"](acc, {"C1": 0.06}, 0.697)
+    br = WO["wo_select_branch"](ge)
+    summ = {c[0]: {"exact_acc": acc.get(c[0]), "corr": None, "parse_fail_rate": 0.0}
+            for c in WO["WO_CONDITIONS"]}
+    md = WO["wo_decision_record_md"]("instruct", ge, br, summ,
+                                     WO["wo_2x2_verdict"](0.89, 0.018, 0.85),
+                                     0.203, 0.203,
+                                     {"transformer_lens": "2.x", "model_revision": "abc",
+                                      "prepend_bos": True, "format": "bare-continuation"})
+    check("decision record mentions branch", br["branch"] in md)
+    check("decision record has gate table", "G_symmetry" in md and "Localization verdict" in md)
+
+
+def test_operand_magnitude_bins():
+    pairs = WO["wo_build_pairs"]()
+    bins = WO["wo_operand_magnitude_bins"](pairs, n_bins=5)
+    check("5 magnitude bins", len(bins) == 5)
+    total = sum(b["n"] for b in bins)
+    check("all pairs binned", total == len(pairs))
+
+
+def main():
+    for fn in sorted(g for g in globals() if g.startswith("test_")):
+        print(f"\n{fn}:")
+        globals()[fn]()
+    print("\n" + ("ALL PASS" if not _fails else f"FAILURES: {_fails}"))
+    return 0 if not _fails else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

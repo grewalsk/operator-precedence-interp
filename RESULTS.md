@@ -65,7 +65,9 @@ Eight conditions, one shared operand-pair list, band (20,49), N=400, forward-pas
 
 See [`docs/decision_prompt.md`](docs/decision_prompt.md) for a self-contained brief an agent (or you) can act on.
 
-1. **Run `-Instruct` (recommended first move).** One line — `CFG["model_name"]="meta-llama/Llama-3.1-8B-Instruct"`, bump `g3_accuracy_floor`→~0.80, re-run G2/G3/G3.5 (~20 min). Either Instruct makes C1≈C2≈C0 + surface-robust → **localization valid + a base-vs-Instruct story**, or it's also fragile → **a strong generality result**.
+> **UPDATE — option 1 is now IMPLEMENTED as Phase 6 (the "work order").** The notebook now contains a self-contained Phase 6 section (`cells/76`–`83`) that runs the base 2×2 surface/compose completion, the `-Instruct` re-run (G2/G3/G3.5), the **six validity gates** (§7), the branch decision tree (§8), and the first downstream artifact (localization, or Branch-B controls + the C6→C1 salvage). It emits all deliverables to `results/`. The decision logic is CPU-unit-tested (`tests/test_wo_logic.py`); the gated numbers need one A100 `Run All`. See [`docs/work_order_runbook.md`](docs/work_order_runbook.md). Predicted outcome: **PARTIAL_REPAIR** (compose repaired, surface fragility persists → localization valid conditional on spaced format).
+
+1. **Run `-Instruct` (recommended first move — now wired as Phase 6).** Run the notebook top-to-bottom on an A100; Phase 6 swaps to `meta-llama/Llama-3.1-8B-Instruct`, re-runs the battery, evaluates the gates, and selects the branch. Either Instruct makes C1≈C2≈C0 + surface-robust → **localization valid + a base-vs-Instruct story**, or it's also fragile → **a strong generality result**.
 2. **Pivot to the composition-asymmetry paper** on base Llama — no more model runs to start writing; add operand-magnitude / addition-precedence controls.
 3. **Redesign the contrast** so both arms keep the op inside a bracket (equal difficulty) → localization may become valid on base Llama; reworks Phase 2 templates.
 
