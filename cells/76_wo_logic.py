@@ -31,6 +31,16 @@ import numpy as np
 WO_MODEL_REGISTRY = {
     "base":     "meta-llama/Llama-3.1-8B",
     "instruct": "meta-llama/Llama-3.1-8B-Instruct",
+    # WORK ORDER #4 (§3.1) — cross-model generality. Instruction-following models
+    # <= 9B (bf16 weights <= ~18GB, fits A100-40 at the sub-30-token seqs here) plus a
+    # Llama-3.2 scale pair. Qwen2.5 is UNGATED (start there); Gemma-2/Mistral/Llama-3.2
+    # are gated (accept the license per model page; set HF_TOKEN). A model you can't
+    # access must SKIP + report (access_denied), never crash the run (§6 hazard).
+    "qwen25_7b_it":  "Qwen/Qwen2.5-7B-Instruct",            # UNGATED — start here
+    "gemma2_9b_it":  "google/gemma-2-9b-it",                # gated; ~18GB bf16
+    "mistral_7b_it": "mistralai/Mistral-7B-Instruct-v0.3",  # gated
+    "llama32_1b_it": "meta-llama/Llama-3.2-1B-Instruct",    # scale pair (small)
+    "llama32_3b_it": "meta-llama/Llama-3.2-3B-Instruct",    # scale pair (mid)
 }
 WO_BAND = (20, 49)        # DO NOT CHANGE (work order §11: comparability w/ Phase 3.5 base).
 WO_N = 400                # N=400 shared (B,C) pairs (§5.1).
@@ -636,13 +646,11 @@ def wo_fewshot_render(render, gt, shots, test_pair, pool, seed=0):
     the scored next-token id). Deterministic given `seed`; shots are guaranteed
     distinct from each other (replace=False) and from the test pair (excluded)."""
     B, C = int(test_pair[0]), int(test_pair[1])
-    cand = [(int(b), int(c)) for (b, c) in pool if (int(b), int(c)) != (B, C)]
-    chosen = []
-    s = int(shots)
-    if s > 0 and cand:
-        rng = np.random.default_rng(int(seed))
-        sel = rng.choice(len(cand), size=min(s, len(cand)), replace=False)
-        chosen = [cand[int(i)] for i in sel]
+    # Shot-pair selection is shared with the WO#4 demo-type builders (cell §8d,
+    # _wo_select_shot_pairs — late-bound: cell 76 runs fully before any caller) so
+    # a 'correct' demo set and a length-matched 'wrong_answer'/'scrambled' set draw
+    # the IDENTICAL pairs and differ only in demo content (the §3.4 confound control).
+    chosen = _wo_select_shot_pairs(shots, test_pair, pool, seed)
     lines = [f"{render(b, c)} {gt(b, c)}" for (b, c) in chosen]
     lines.append(render(B, C))
     return "\n".join(lines)
@@ -714,6 +722,470 @@ def wo_fsprobe_trend(r2_0, r2_2, r2_4, stable_tol=0.05, rise_thr=0.10,
                 f"B stays decodable across regimes ({msg}); few-shot changes USE, "
                 "not encoding.")
     return ("MIXED", f"intermediate trend ({msg}); report as-is.")
+
+
+# ----------------------------------------------------------------------------
+# 8d) WORK ORDER #4 — cross-model generality + boundary / decodability / format.
+#     Forward-pass-FREE math for: the per-model replication verdict (§3.1), the
+#     multi-position probe-site finders (§3.2), the boundary-surface registry +
+#     trigger classifier (§3.3), the length-matched demo-type builders + format-cue
+#     verdict (§3.4), and the refined error classifier (§3.5). Each is unit-tested
+#     in tests/test_wo_logic.py BEFORE any A100 time; the GPU cells (82g..82k) are
+#     thin orchestration over these verified functions. Governing lesson (§1): a
+#     model that does NOT replicate is a RESULT — these functions label it honestly
+#     (non-replicator / out-of-scope), never silently drop it.
+# ----------------------------------------------------------------------------
+
+# --- §3.1 cross-model replication verdict ------------------------------------
+# Thresholds are PARAMS (documented), not magic. Each mirrors the single-checkpoint
+# finding the cross-model run must reproduce (A100_run_2026-06-24.md):
+#   parts_floor   — C4 (inside-bracket mult) AND C6 (bracket eval) must clear this,
+#                   else the model can't even do the PARTS -> capability, not a
+#                   composition failure (the cross-model analogue of G_floor).
+#   collapse_gap  — C4 - C1: the compose collapse (instruct 0.91-0.27=0.64).
+#   opspecific_gap— A1 - C1: addition composes where multiplication doesn't (0.73).
+#   depth_gap     — C1 - D1: one redundant paren layer crashes it (0.27-0.04=0.23).
+#   fewshot_gain  — fewshot@4 - C1: 2-4 in-context examples recover it (+0.65).
+#   fewshot_ceiling_slack — fewshot@4 must reach within this of the C4 ceiling.
+WO_REPL_THR = {
+    "parts_floor": 0.80,
+    "collapse_gap": 0.20,
+    "opspecific_gap": 0.20,
+    "depth_gap": 0.15,
+    "fewshot_gain": 0.20,
+    "fewshot_ceiling_slack": 0.15,
+}
+
+
+def wo_replication_verdict(acc, fewshot_c1_4, thr=None):
+    """Per-model replication verdict (§3.1). `acc` is {cond: accuracy} with keys
+    among C1/C4/C6/A1/D1 (None or missing => that flag can't be established).
+    `fewshot_c1_4` is C1 accuracy at 4 shots (None if not run). Returns the boolean
+    flags + an overall `label`. Thresholds are `thr` overrides on WO_REPL_THR.
+
+    label hierarchy:
+      INCOMPLETE          — a CORE input (C1/C4/C6) is missing; can't decide.
+      OUT_OF_SCOPE (...)  — parts_work is False: the model can't do C4/C6, so a low
+                            C1 is a capability gap, NOT a composition failure
+                            (report separately; do NOT count as failure-to-replicate).
+      REPLICATES_FULL     — core + operation_specific + fewshot_recovers.
+      REPLICATES_CORE     — parts_work + compose_collapses only.
+      DOES_NOT_REPLICATE  — parts work but the collapse pattern is absent (a RESULT)."""
+    t = dict(WO_REPL_THR)
+    if thr:
+        t.update(thr)
+
+    def a(k):
+        v = acc.get(k) if acc else None
+        return None if v is None else float(v)
+
+    cC1, cC4, cC6, cA1, cD1 = a("C1"), a("C4"), a("C6"), a("A1"), a("D1")
+    fs4 = None if fewshot_c1_4 is None else float(fewshot_c1_4)
+    missing = [k for k in ("C1", "C4", "C6") if a(k) is None]
+
+    parts_work = bool(cC4 is not None and cC6 is not None
+                      and cC4 >= t["parts_floor"] and cC6 >= t["parts_floor"])
+    compose_collapses = bool(cC4 is not None and cC1 is not None
+                             and (cC4 - cC1) >= t["collapse_gap"])
+    operation_specific = bool(cA1 is not None and cC1 is not None
+                              and (cA1 - cC1) >= t["opspecific_gap"])
+    depth_sensitive = bool(cD1 is not None and cC1 is not None
+                           and (cC1 - cD1) >= t["depth_gap"])
+    fewshot_recovers = bool(fs4 is not None and cC1 is not None and cC4 is not None
+                            and (fs4 - cC1) >= t["fewshot_gain"]
+                            and fs4 >= (cC4 - t["fewshot_ceiling_slack"]))
+
+    replicates_core = bool(parts_work and compose_collapses)
+    replicates_full = bool(replicates_core and operation_specific and fewshot_recovers)
+    out_of_scope = bool((not missing) and (not parts_work))
+
+    if missing:
+        label = f"INCOMPLETE (missing {','.join(missing)})"
+    elif not parts_work:
+        label = "OUT_OF_SCOPE (can't even do C4/C6 — capability, not composition)"
+    elif replicates_full:
+        label = "REPLICATES_FULL"
+    elif replicates_core:
+        label = "REPLICATES_CORE"
+    else:
+        label = "DOES_NOT_REPLICATE"
+
+    return {
+        "parts_work": parts_work,
+        "compose_collapses": compose_collapses,
+        "operation_specific": operation_specific,
+        "depth_sensitive": depth_sensitive,
+        "fewshot_recovers": fewshot_recovers,
+        "replicates_core": replicates_core,
+        "replicates_full": replicates_full,
+        "out_of_scope": out_of_scope,
+        "label": label,
+        "missing": missing,
+        "thresholds": t,
+    }
+
+
+# --- §3.4/§3.2 shared: deterministic wrong answer + shot-pair selection -------
+def wo_gt_wrong(b, c):
+    """Deterministic RANDOM wrong answer with the SAME #digits as b*c (length-matched,
+    uncorrelated with the true product) — for the non-repairing / wrong-answer demos.
+    Moved here from the GPU control cell (82f) per the two-tier rule; byte-identical
+    to that logic so cached prompts are unchanged. Pure; seeded by (b,c)."""
+    p = int(b) * int(c)
+    d = len(str(p))
+    lo, hi = 10 ** (d - 1), 10 ** d - 1
+    r = np.random.default_rng(int(b) * 100003 + int(c))
+    for _ in range(32):
+        w = int(r.integers(lo, hi + 1))
+        if w != p:
+            return w
+    return lo if lo != p else lo + 1
+
+
+def _wo_select_shot_pairs(shots, test_pair, pool, seed=0):
+    """Deterministically choose `shots` distinct demo pairs from `pool`, EXCLUDING the
+    test pair (no answer leakage). Shared by wo_fewshot_render and the WO#4 demo-type
+    builders so length-matched demo variants draw the IDENTICAL pairs. Byte-for-byte
+    the selection wo_fewshot_render used before the refactor (same RNG call order)."""
+    B, C = int(test_pair[0]), int(test_pair[1])
+    cand = [(int(b), int(c)) for (b, c) in pool if (int(b), int(c)) != (B, C)]
+    s = int(shots)
+    if s <= 0 or not cand:
+        return []
+    rng = np.random.default_rng(int(seed))
+    sel = rng.choice(len(cand), size=min(s, len(cand)), replace=False)
+    return [cand[int(i)] for i in sel]
+
+
+# --- §3.2 multi-position probe-site finders ----------------------------------
+# Locate the four probe sites in a tokenized C1 surface '( 0 + B ) * C =' by
+# DECODE-AND-WALK on token CONTENT (multi-token operands shift raw indices — mirror
+# the robust Phase-2 / _fsp_site_ok locator), and ASSERT the located window reads
+# the expected role before any caller probes it. Decodability ONLY (no causal claim).
+def wo_last_index(token_strs, target):
+    """Index of the LAST per-token decoded string == `target` (already stripped),
+    else None. Used for the final '=' (and as the only-')' bare case)."""
+    last = None
+    for i, t in enumerate(token_strs):
+        if (t.strip() if isinstance(t, str) else t) == target:
+            last = i
+    return last
+
+
+def wo_first_index_after(token_strs, target, after):
+    """Index of the FIRST per-token decoded string == `target` strictly after index
+    `after` (e.g. the '*' after the test ')'), else None."""
+    if after is None:
+        return None
+    for i in range(int(after) + 1, len(token_strs)):
+        t = token_strs[i]
+        if (t.strip() if isinstance(t, str) else t) == target:
+            return i
+    return None
+
+
+def _wo_walk_back_int(strs, before):
+    """Concatenate the contiguous digit tokens ending just before index `before`
+    (skipping pure-space tokens). Returns the integer string (may be '')."""
+    digits = ""
+    j = int(before) - 1
+    while j >= 0:
+        s = strs[j].strip() if isinstance(strs[j], str) else strs[j]
+        if s == "":
+            j -= 1
+            continue
+        if s.isdigit():
+            digits = s + digits
+            j -= 1
+            continue
+        break
+    return digits
+
+
+def wo_locate_c1_sites(token_strs, B, C):
+    """Locate the four probe positions in a tokenized C1 surface '( 0 + B ) * C ='.
+    token_strs: per-token decoded strings (stripped or not). Returns a dict with
+    single representative indices the GPU probe reads the residual at:
+        rparen        — the TEST ')' (LAST ')'; reuse wo_last_rparen_index semantics)
+        star          — first '*' after ')'
+        c_operand     — LAST token of the C operand (it has 'seen' all of C)
+        c_operand_span— all C-operand token indices (multi-token operands)
+        equals        — the final '='
+    plus 'roles' (B sits before ')', C sits after '*') and 'ok' (all four found AND
+    roles verify). A caller MUST check 'ok' before probing (Hazard: a different
+    tokenizer/format can break the walk -> mark the model tokenizer_incompatible)."""
+    strs = [(t.strip() if isinstance(t, str) else t) for t in token_strs]
+    n = len(strs)
+    out = {"rparen": None, "star": None, "c_operand": None, "c_operand_span": [],
+           "equals": None, "roles": {}, "ok": False}
+    rp = wo_last_rparen_index(strs)
+    out["rparen"] = rp
+    if rp is None:
+        return out
+    star = wo_first_index_after(strs, "*", rp)
+    out["star"] = star
+    eq = wo_last_index(strs, "=")
+    out["equals"] = eq
+    if star is None:
+        return out
+    # C operand = contiguous digit tokens after '*' (up to '=' or end-of-sequence).
+    end = eq if (eq is not None and eq > star) else n
+    span, digits = [], ""
+    for i in range(star + 1, end):
+        s = strs[i]
+        if s == "":
+            if span:
+                break
+            continue
+        if s.isdigit():
+            span.append(i)
+            digits += s
+        elif span:
+            break
+    out["c_operand_span"] = span
+    out["c_operand"] = span[-1] if span else None
+    bdig = _wo_walk_back_int(strs, rp)
+    out["roles"] = {
+        "B_at_rparen": bool(bdig == str(int(B))),
+        "C_after_star": bool(digits == str(int(C))),
+        "has_star": star is not None,
+        "has_equals": eq is not None,
+    }
+    out["ok"] = bool(out["roles"]["B_at_rparen"] and out["roles"]["C_after_star"]
+                     and span and eq is not None)
+    return out
+
+
+# --- §3.3 failure-boundary surfaces + trigger classifier ---------------------
+# Vary the trigger: real bracketed sums, swapped inner/outer ops, and depth-2 nests.
+# Surfaces need auxiliary operands A (and D) beyond (B,C) — drawn deterministically
+# per (B,C), in-band, so EVERY model/condition sees the SAME A,D for a given (B,C)
+# (paired across the battery, like WO_PAIRS). Drawn from a per-(B,C) seeded RNG.
+WO_BOUNDARY_SEED = 7
+
+
+def wo_aux_operands(B, C, seed=WO_BOUNDARY_SEED, band=WO_BAND):
+    """Deterministic in-band auxiliary operands (A, D) for the boundary surfaces,
+    keyed by (B,C). Same (B,C) -> same (A,D) for every model and condition (paired)."""
+    lo, hi = band
+    r = np.random.default_rng(int(seed) * 1_000_003 + int(B) * 1009 + int(C))
+    A = int(r.integers(lo, hi + 1))
+    D = int(r.integers(lo, hi + 1))
+    return A, D
+
+
+# (key, name, render(B,C)->str, gt(B,C)->int). Surfaces spaced like C1 (mind spaces).
+WO_BOUNDARY_CONDITIONS = [
+    # real addition inside the bracket: is the trigger the additive IDENTITY or ANY
+    # bracketed sum feeding the outer '*'?
+    ("BD1", "addsum_times",
+     lambda B, C: f"( {wo_aux_operands(B, C)[0]} + {B} ) * {C} =",
+     lambda B, C: (wo_aux_operands(B, C)[0] + B) * C),
+    # bracketed sum on the RIGHT, multiplicative outer.
+    ("BD2", "outer_times_sum",
+     lambda B, C: f"{wo_aux_operands(B, C)[0]} * ( {B} + {C} ) =",
+     lambda B, C: wo_aux_operands(B, C)[0] * (B + C)),
+    # bracketed PRODUCT, additive outer — does the asymmetry flip? (predicted: works)
+    ("BD3", "prod_plus",
+     lambda B, C: f"( {wo_aux_operands(B, C)[0]} * {B} ) + {C} =",
+     lambda B, C: (wo_aux_operands(B, C)[0] * B) + C),
+    # depth-2 nest feeding a multiplicative outer: ( ( 0 + B ) * C ) * D = B*C*D.
+    ("BD4", "depth2_times_d",
+     lambda B, C: f"( ( 0 + {B} ) * {C} ) * {wo_aux_operands(B, C)[1]} =",
+     lambda B, C: B * C * wo_aux_operands(B, C)[1]),
+    # two bracketed sums feeding a multiplicative outer: ( A + B ) * ( C + D ) =.
+    ("BD5", "sum_times_sum",
+     lambda B, C: f"( {wo_aux_operands(B, C)[0]} + {B} ) * ( {C} + {wo_aux_operands(B, C)[1]} ) =",
+     lambda B, C: (wo_aux_operands(B, C)[0] + B) * (C + wo_aux_operands(B, C)[1])),
+]
+
+# Structural read of each surface for the trigger classifier. The hypothesis under
+# test (from the single-checkpoint finding): the model FAILS iff a PARENTHESIZED
+# sub-expression is an operand of a MULTIPLICATIVE outer op (outer '*'); a bracket
+# feeding an ADDITIVE outer op (outer '+') is fine.
+WO_BOUNDARY_STRUCT = {
+    "BD1": {"surface": "( A + B ) * C =",            "outer_op": "*", "predict": "fail"},
+    "BD2": {"surface": "A * ( B + C ) =",            "outer_op": "*", "predict": "fail"},
+    "BD3": {"surface": "( A * B ) + C =",            "outer_op": "+", "predict": "pass"},
+    "BD4": {"surface": "( ( 0 + B ) * C ) * D =",    "outer_op": "*", "predict": "fail"},
+    "BD5": {"surface": "( A + B ) * ( C + D ) =",    "outer_op": "*", "predict": "pass_or_fail"},
+}
+
+
+def wo_boundary_summary(acc, fail_thr=0.50, pass_thr=0.70):
+    """Classify the failure trigger from boundary-surface accuracies. `acc` is
+    {key: accuracy} over WO_BOUNDARY_CONDITIONS keys (None/missing -> 'n/a'). An
+    accuracy < fail_thr is 'fails', >= pass_thr is 'works', between is 'partial'.
+    Returns per-surface rows + whether the data is CONSISTENT with the 'bracketed
+    sub-expression feeding a multiplicative outer op' trigger, and a one-line
+    characterization. Decision logic only (no model call)."""
+    def obs(v):
+        if v is None:
+            return "n/a"
+        return "fails" if v < fail_thr else ("works" if v >= pass_thr else "partial")
+
+    rows = []
+    for k, meta in WO_BOUNDARY_STRUCT.items():
+        v = None if not acc else acc.get(k)
+        rows.append({"key": k, "surface": meta["surface"], "outer_op": meta["outer_op"],
+                     "predict": meta["predict"], "acc": v, "observed": obs(v)})
+
+    # Consistency with the outer-'*' => fail / outer-'+' => works rule, evaluated only
+    # on the surfaces with a definite prediction and a definite (non-partial) read.
+    decided = [r for r in rows if r["predict"] in ("fail", "pass")
+               and r["observed"] in ("fails", "works")]
+    consistent = bool(decided) and all(
+        (r["predict"] == "fail" and r["observed"] == "fails") or
+        (r["predict"] == "pass" and r["observed"] == "works")
+        for r in decided)
+    mult_fail = all(r["observed"] == "fails"
+                    for r in rows if r["outer_op"] == "*" and r["observed"] != "n/a")
+    add_ok = all(r["observed"] == "works"
+                 for r in rows if r["outer_op"] == "+" and r["observed"] != "n/a")
+
+    if consistent and mult_fail and add_ok:
+        characterization = ("fails iff a bracketed sub-expression is an operand of a "
+                            "multiplicative outer op (outer '+' composes; outer '*' collapses)")
+    elif mult_fail and not add_ok:
+        characterization = ("bracketed sub-expressions feeding '*' collapse, but the additive "
+                            "outer control did not cleanly pass — report per-surface")
+    else:
+        characterization = "trigger pattern not clean across these surfaces — report per-surface"
+
+    return {"rows": rows, "consistent": consistent, "mult_outer_fails": mult_fail,
+            "add_outer_works": add_ok, "characterization": characterization,
+            "thresholds": {"fail_thr": fail_thr, "pass_thr": pass_thr}}
+
+
+# --- §3.4 length-matched demo-type builders + format-cue verdict -------------
+# Pin down WHY few-shot recovers C1: is it the demos' arithmetic CONTENT, or just the
+# task FORMAT/length? Four demo types at fixed shots (default 4), all length-matched
+# to the correct demo (same whitespace-token count -> the only thing that varies is
+# demo content/structure, not prefix length). The TEST line is always the canonical
+# bare C1; only the DEMOS differ.
+WO_DEMO_TYPES = ["correct", "wrong_answer", "scrambled_format", "random_text"]
+_WO_FILLER = ["the", "cat", "sat", "on", "a", "mat", "by", "door", "when", "sun",
+              "rose", "over", "hill", "and", "far", "away", "bird", "sang", "soft", "now"]
+
+
+def _wo_demo_line(demo_type, render, gt, b, c, dseed):
+    """One length-matched demo line of a given type for operands (b,c). 'correct' is
+    byte-identical to wo_fewshot_render's line so wo_demo_render('correct', ...) ==
+    wo_fewshot_render(...) for the same seed (asserted in tests)."""
+    if demo_type == "correct":
+        return f"{render(b, c)} {gt(b, c)}"
+    if demo_type == "wrong_answer":
+        return f"{render(b, c)} {wo_gt_wrong(b, c)}"
+    if demo_type == "scrambled_format":
+        # same tokens, permuted LHS (breaks operator-precedence structure), CORRECT value.
+        toks = render(b, c).split()           # e.g. ['(','0','+','b',')','*','c','=']
+        body = toks[:-1] if toks and toks[-1] == "=" else toks
+        r = np.random.default_rng(int(dseed))
+        perm = r.permutation(len(body))
+        scrambled = " ".join(body[int(i)] for i in perm)
+        return f"{scrambled} = {gt(b, c)}"
+    if demo_type == "random_text":
+        # length-matched NON-arithmetic filler (pure format/length control): same
+        # whitespace-token count as a 'correct' line, no numbers, no '=' structure.
+        n_tok = len(render(b, c).split()) + 1
+        r = np.random.default_rng(int(dseed))
+        words = [_WO_FILLER[int(r.integers(0, len(_WO_FILLER)))] for _ in range(n_tok)]
+        return " ".join(words)
+    raise ValueError(f"unknown demo_type {demo_type!r}; expected {WO_DEMO_TYPES}")
+
+
+def wo_demo_render(demo_type, render, gt, shots, test_pair, pool, seed=0):
+    """Few-shot prompt whose `shots` DEMOS are of `demo_type` (length-matched) and
+    whose TEST line is the canonical bare render(test_pair). Shot pairs are the SAME
+    across demo types (shared _wo_select_shot_pairs), so the types differ only in demo
+    content — the §3.4 confound control. Deterministic given `seed`."""
+    B, C = int(test_pair[0]), int(test_pair[1])
+    chosen = _wo_select_shot_pairs(shots, test_pair, pool, seed)
+    lines = [_wo_demo_line(demo_type, render, gt, b, c, int(seed) + 7919 * (di + 1))
+             for di, (b, c) in enumerate(chosen)]
+    lines.append(render(B, C))
+    return "\n".join(lines)
+
+
+def wo_format_cue_verdict(acc_by_type, zeroshot_acc, tol=0.15, recover_margin=0.20):
+    """Decide whether few-shot recovery is FORMAT-primed or CONTENT-driven (§3.4).
+    `acc_by_type`: {demo_type: C1 accuracy at the fixed shot count}. `zeroshot_acc`:
+    C1 accuracy at 0 shots. A type 'recovers' if it clears 0-shot by >= recover_margin.
+        FORMAT_PRIMED  — wrong_answer recovers ~= correct (within tol) AND random_text
+                         does NOT recover (stays near 0-shot) -> in-context recovery is
+                         cued by the task FORMAT, not the demos' arithmetic content.
+        CONTENT_DRIVEN — only correct recovers (wrong_answer does not) -> the model
+                         learns from the demos' VALUES.
+        MIXED          — anything else; report the numbers as-is."""
+    def g(k):
+        v = acc_by_type.get(k) if acc_by_type else None
+        return None if v is None else float(v)
+
+    z = None if zeroshot_acc is None else float(zeroshot_acc)
+    correct, wrong = g("correct"), g("wrong_answer")
+    rand, scr = g("random_text"), g("scrambled_format")
+
+    def recovers(x):
+        return x is not None and z is not None and (x - z) >= recover_margin
+
+    def near(x, y):
+        return x is not None and y is not None and abs(x - y) <= tol
+
+    def flat(x):  # stays near the 0-shot floor (does not recover)
+        return x is not None and z is not None and (not recovers(x))
+
+    wrong_like_correct = bool(near(wrong, correct) and recovers(wrong))
+    random_flat = bool(flat(rand))
+
+    if wrong_like_correct and random_flat:
+        label = "FORMAT_PRIMED"
+        reading = ("format-primed, not content-learned: wrong-answer demos recover C1 about "
+                   "as well as correct demos, while length-matched random-text demos do not — "
+                   "the cue is the task FORMAT, not the demos' arithmetic values.")
+    elif recovers(correct) and not recovers(wrong):
+        label = "CONTENT_DRIVEN"
+        reading = ("content-driven: only correct demos recover C1; wrong-answer demos do not — "
+                   "the model uses the demos' VALUES, not just their format.")
+    else:
+        label = "MIXED"
+        reading = ("mixed/ambiguous: the recovery pattern across demo types is not clean — "
+                   "report the per-type accuracies as-is.")
+
+    return {"label": label, "reading": reading,
+            "recovers": {k: recovers(g(k)) for k in WO_DEMO_TYPES},
+            "acc_by_type": {k: g(k) for k in WO_DEMO_TYPES},
+            "zeroshot_acc": z,
+            "thresholds": {"tol": tol, "recover_margin": recover_margin}}
+
+
+# --- §3.5 refined error classifier -------------------------------------------
+def wo_classify_error_detail(pred, B, C):
+    """Finer-grained bucket for a C1 PARSED prediction (§3.5), to tell 'attempting
+    the product and erring' from 'doing something unrelated' (the bag-of-heuristics
+    line). Priority order (ties resolved top-down):
+        parse_fail (None) > correct (==B*C) > equals_B > equals_C > equals_B_plus_C
+        > near_product (|pred - B*C|/(B*C) <= 0.10, i.e. close but wrong)
+        > right_magnitude (same #digits as B*C) > unrelated."""
+    if pred is None:
+        return "parse_fail"
+    prod = int(B) * int(C)
+    if pred == prod:
+        return "correct"
+    if pred == int(B):
+        return "equals_B"
+    if pred == int(C):
+        return "equals_C"
+    if pred == int(B) + int(C):
+        return "equals_B_plus_C"
+    if prod != 0 and abs(pred - prod) / abs(prod) <= 0.10:
+        return "near_product"
+    if len(str(abs(int(pred)))) == len(str(abs(prod))):
+        return "right_magnitude"
+    return "unrelated"
+
+
+WO_ERROR_DETAIL_CATS = ["correct", "equals_B", "equals_C", "equals_B_plus_C",
+                        "near_product", "right_magnitude", "unrelated", "parse_fail"]
 
 
 # ----------------------------------------------------------------------------
@@ -790,6 +1262,68 @@ def _wo_selftest():
     assert wo_fsprobe_trend(0.70, 0.85, 0.90)[0] == "REPRESENTATION_IMPROVES"
     assert wo_fsprobe_trend(0.90, 0.20, 0.20)[0] == "PROBE_SITE_SUSPECT"
     assert wo_fsprobe_trend(0.90, None, 0.9)[0] == "INCONCLUSIVE"
+
+    # WORK ORDER #4 pure logic (§3.1-§3.5).
+    # §3.1 replication verdict on the single-checkpoint instruct fixture -> FULL.
+    _rv = wo_replication_verdict(
+        {"C1": 0.265, "C4": 0.9075, "C6": 1.0, "A1": 0.995, "D1": 0.0375}, 0.915)
+    assert _rv["replicates_full"] and _rv["label"] == "REPLICATES_FULL", _rv
+    # a model that can't do the parts -> OUT_OF_SCOPE (not a failure-to-replicate).
+    _oos = wo_replication_verdict({"C1": 0.1, "C4": 0.4, "C6": 0.5}, 0.2)
+    assert _oos["out_of_scope"] and _oos["label"].startswith("OUT_OF_SCOPE"), _oos
+    # parts work but no collapse -> DOES_NOT_REPLICATE (an honest non-replicator).
+    _nr = wo_replication_verdict({"C1": 0.88, "C4": 0.90, "C6": 0.95}, 0.90)
+    assert _nr["parts_work"] and not _nr["compose_collapses"] and _nr["label"] == "DOES_NOT_REPLICATE"
+    # missing core input -> INCOMPLETE.
+    assert wo_replication_verdict({"C4": 0.9, "C6": 0.9}, 0.9)["label"].startswith("INCOMPLETE")
+
+    # §3.4 demo builders: 'correct' must equal wo_fewshot_render; types length-matched.
+    _dr = dict((c[0], c[2]) for c in WO_CONDITIONS)["C1"]
+    _dg = dict((c[0], c[3]) for c in WO_CONDITIONS)["C1"]
+    _dpool = wo_build_pairs()
+    _tp = _dpool[0]
+    assert wo_demo_render("correct", _dr, _dg, 4, _tp, _dpool, 3) == \
+        wo_fewshot_render(_dr, _dg, 4, _tp, _dpool, 3)
+    for _dt in WO_DEMO_TYPES:
+        _p = wo_demo_render(_dt, _dr, _dg, 4, _tp, _dpool, 5)
+        assert len(_p.splitlines()) == 5 and _p.splitlines()[-1] == _dr(*_tp)
+    assert wo_gt_wrong(23, 47) != 23 * 47 and len(str(wo_gt_wrong(23, 47))) == len(str(23 * 47))
+    # §3.4 verdict: wrong~=correct & random flat -> FORMAT_PRIMED; only correct -> CONTENT.
+    assert wo_format_cue_verdict(
+        {"correct": 0.92, "wrong_answer": 0.88, "scrambled_format": 0.80,
+         "random_text": 0.30}, 0.27)["label"] == "FORMAT_PRIMED"
+    assert wo_format_cue_verdict(
+        {"correct": 0.92, "wrong_answer": 0.30, "random_text": 0.30}, 0.27)["label"] == "CONTENT_DRIVEN"
+
+    # §3.2 position finders on a whitespace-token analog of '( 0 + 23 ) * 47 ='.
+    _c1toks = ["(", "0", "+", "23", ")", "*", "47", "="]
+    _loc = wo_locate_c1_sites(_c1toks, 23, 47)
+    assert _loc["ok"] and _loc["rparen"] == 4 and _loc["star"] == 5 \
+        and _loc["c_operand"] == 6 and _loc["equals"] == 7, _loc
+    # multi-token C operand ('4','7') shifts indices but content-walk still locates it.
+    _c1split = ["(", "0", "+", "23", ")", "*", "4", "7", "="]
+    _loc2 = wo_locate_c1_sites(_c1split, 23, 47)
+    assert _loc2["ok"] and _loc2["c_operand_span"] == [6, 7] and _loc2["equals"] == 8, _loc2
+    assert wo_last_index(["=", "x", "="], "=") == 2
+    assert wo_first_index_after(["*", "a", "*"], "*", 0) == 2
+
+    # §3.3 boundary surfaces + trigger classifier.
+    _br = dict((c[0], c[2]) for c in WO_BOUNDARY_CONDITIONS)
+    _bg = dict((c[0], c[3]) for c in WO_BOUNDARY_CONDITIONS)
+    _A, _D = wo_aux_operands(23, 47)
+    assert _br["BD1"](23, 47) == f"( {_A} + 23 ) * 47 =" and _bg["BD1"](23, 47) == (_A + 23) * 47
+    assert _bg["BD4"](23, 47) == 23 * 47 * _D
+    assert wo_aux_operands(23, 47) == wo_aux_operands(23, 47)   # deterministic
+    _bs = wo_boundary_summary({"BD1": 0.1, "BD2": 0.15, "BD3": 0.85, "BD4": 0.05, "BD5": 0.1})
+    assert _bs["consistent"] and "multiplicative outer" in _bs["characterization"], _bs
+
+    # §3.5 refined error classifier (priority + the new fuzzy buckets).
+    _ed = wo_classify_error_detail
+    assert _ed(23 * 47, 23, 47) == "correct" and _ed(None, 23, 47) == "parse_fail"
+    assert _ed(23, 23, 47) == "equals_B" and _ed(70, 23, 47) == "equals_B_plus_C"
+    assert _ed(1081 - 50, 23, 47) == "near_product"          # |Δ|/1081 ~ 0.046 <= 0.10
+    assert _ed(1500, 23, 47) == "right_magnitude"            # 4 digits like 1081, not near
+    assert _ed(7, 23, 47) == "unrelated"                     # 1 digit, far
     return True
 
 

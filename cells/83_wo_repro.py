@@ -54,6 +54,18 @@ _lines.append("localization verdict : " + str(globals().get('WO_GATE_EVAL', {}).
 _lines.append("base 2x2 verdict     : " + str(globals().get('WO_BASE_2X2_VERDICT', {}).get('verdict')))
 _lines.append("")
 
+# WORK ORDER #4 — cross-model replication labels + boundary aux seed (honest record).
+_xm_tbl = globals().get("WO_XM_RESULTS", {})
+if _xm_tbl:
+    _lines.append("WO#4 cross-model replication (shared WO_PAIRS):")
+    for _t, _r in _xm_tbl.items():
+        _lines.append(f"  {_t:<14}: {str(_r.get('status')):<22} {_r.get('label')}")
+    _lines.append(f"  boundary aux-operand seed : {globals().get('WO_BOUNDARY_SEED')}")
+    _lines.append("  WO#4 boundary surfaces (rendered for B=23,C=47):")
+    for k, name, render, gt in globals().get("WO_BOUNDARY_CONDITIONS", []):
+        _lines.append(f"    {k:<4} {name:<18} {render(23,47):<30} -> gt {gt(23,47)}")
+    _lines.append("")
+
 # manifest of produced deliverables (present-on-disk check).
 _deliverables = [
     "base_2x2.csv", "instruct_battery.csv", "gate_evaluation.json",
@@ -67,6 +79,11 @@ _deliverables = [
     "fewshot_decodability_summary.csv",
     # WO#3 follow-ups: by-layer curve + non-repairing control (R1 vs R2):
     "fewshot_decodability_by_layer.csv", "fewshot_decodability_control.csv",
+    # WORK ORDER #4 — cross-model generality + boundary / decodability / format (§4):
+    "cross_model_battery.csv",
+    "position_decodability_base.json", "position_decodability_instruct.json",
+    "position_decodability_summary.csv", "position_decodability_heatmap.png",
+    "boundary_map.csv", "format_recovery.csv", "error_detail.csv",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:

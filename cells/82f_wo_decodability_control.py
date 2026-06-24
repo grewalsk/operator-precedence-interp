@@ -27,16 +27,10 @@ WO_FSCTRL_SHOTS = [2, 4]
 WO_FSCTRL_S = 4   # the shot count the R1/R2 verdict is read at (strongest real drop)
 
 
-def _wo_gt_wrong(b, c):
-    """Deterministic RANDOM wrong answer with the SAME #digits as b*c (length-matched,
-    uncorrelated with the true product) — makes the demos non-repairing."""
-    p = int(b) * int(c); d = len(str(p)); lo, hi = 10 ** (d - 1), 10 ** d - 1
-    r = np.random.default_rng(int(b) * 100003 + int(c))
-    for _ in range(32):
-        w = int(r.integers(lo, hi + 1))
-        if w != p:
-            return w
-    return lo if lo != p else lo + 1
+# Deterministic RANDOM wrong answer (same #digits as b*c) — now the unit-tested
+# pure builder in cell 76 (two-tier rule). Aliased here so the control prompts (and
+# their cached artifacts) are byte-identical to before the move.
+_wo_gt_wrong = wo_gt_wrong
 
 
 def _wo_ctrl_seed(shots):

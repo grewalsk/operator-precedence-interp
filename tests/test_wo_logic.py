@@ -393,6 +393,264 @@ def test_fsprobe_trend():
     check("intermediate -> MIXED", tr(0.90, 0.83, 0.90)[0] == "MIXED")
 
 
+# ================================================================= WORK ORDER #4 ==
+# ------------------------------------------------- §3.1 cross-model replication verdict
+def test_replication_verdict():
+    rv = WO["wo_replication_verdict"]
+    # single-checkpoint instruct fixture (A100_run_2026-06-24): REPLICATES_FULL.
+    full = rv({"C1": 0.265, "C4": 0.9075, "C6": 1.0, "A1": 0.995, "D1": 0.0375}, 0.915)
+    check("instruct fixture -> replicates_full", full["replicates_full"])
+    check("instruct fixture label REPLICATES_FULL", full["label"] == "REPLICATES_FULL")
+    check("all sub-flags true on full fixture",
+          all(full[k] for k in ("parts_work", "compose_collapses", "operation_specific",
+                                "depth_sensitive", "fewshot_recovers", "replicates_core")))
+    check("full fixture not out_of_scope", not full["out_of_scope"])
+    # base fixture: parts work, collapses, op-specific, fewshot recovers -> full too.
+    base = rv({"C1": 0.507, "C4": 0.890, "C6": 1.0, "A1": 0.90, "D1": 0.04}, 0.882)
+    check("base fixture replicates_core", base["replicates_core"])
+    # capability gap: can't do C4/C6 -> OUT_OF_SCOPE (not a failure-to-replicate).
+    oos = rv({"C1": 0.10, "C4": 0.40, "C6": 0.50}, 0.20)
+    check("low-capability model -> out_of_scope", oos["out_of_scope"])
+    check("out_of_scope label", oos["label"].startswith("OUT_OF_SCOPE"))
+    check("out_of_scope not counted as replicates_core", not oos["replicates_core"])
+    # an HONEST non-replicator: parts work but C1 doesn't collapse.
+    nr = rv({"C1": 0.88, "C4": 0.90, "C6": 0.95, "A1": 0.92, "D1": 0.10}, 0.90)
+    check("non-replicator parts_work true", nr["parts_work"])
+    check("non-replicator compose_collapses false", not nr["compose_collapses"])
+    check("non-replicator label DOES_NOT_REPLICATE", nr["label"] == "DOES_NOT_REPLICATE")
+    # core but not full: collapses, but addition does NOT compose (op-specificity absent).
+    core = rv({"C1": 0.30, "C4": 0.90, "C6": 0.95, "A1": 0.35, "D1": 0.05}, 0.40)
+    check("core-only: replicates_core true", core["replicates_core"])
+    check("core-only: operation_specific false (A1~C1)", not core["operation_specific"])
+    check("core-only: not replicates_full", not core["replicates_full"])
+    check("core-only label REPLICATES_CORE", core["label"] == "REPLICATES_CORE")
+    # fewshot below the C4 ceiling -> fewshot_recovers false even if it lifts C1.
+    nofs = rv({"C1": 0.30, "C4": 0.90, "C6": 0.95, "A1": 0.95, "D1": 0.05}, 0.55)
+    check("fewshot below ceiling -> fewshot_recovers false", not nofs["fewshot_recovers"])
+    # missing a CORE input -> INCOMPLETE (not OUT_OF_SCOPE).
+    inc = rv({"C4": 0.9, "C6": 0.9}, 0.9)
+    check("missing C1 -> INCOMPLETE label", inc["label"].startswith("INCOMPLETE"))
+    check("missing C1 -> not out_of_scope", not inc["out_of_scope"])
+    check("missing list reports C1", inc["missing"] == ["C1"])
+    # missing A1 only: core can still hold; full cannot.
+    noA1 = rv({"C1": 0.265, "C4": 0.9075, "C6": 1.0, "D1": 0.0375}, 0.915)
+    check("missing A1: replicates_core still true", noA1["replicates_core"])
+    check("missing A1: operation_specific false", not noA1["operation_specific"])
+    check("missing A1: replicates_full false", not noA1["replicates_full"])
+    # thresholds are overridable params.
+    strict = rv({"C1": 0.265, "C4": 0.9075, "C6": 1.0, "A1": 0.40, "D1": 0.0375}, 0.915,
+                thr={"opspecific_gap": 0.50})
+    check("threshold override tightens operation_specific", not strict["operation_specific"])
+
+
+# ------------------------------------------------- §3.2 multi-position site finders
+def test_position_finders_basic():
+    last = WO["wo_last_index"]
+    first_after = WO["wo_first_index_after"]
+    check("last_index finds final occurrence", last(["=", "x", "=", "y"], "=") == 2)
+    check("last_index strips tokens", last([" = ", "x"], "=") == 0)
+    check("last_index None when absent", last(["a", "b"], "=") is None)
+    check("first_index_after strictly after", first_after(["*", "a", "*"], "*", 0) == 2)
+    check("first_index_after None when none after", first_after(["*", "a"], "*", 0) is None)
+    check("first_index_after None index -> None", first_after(["*"], "*", None) is None)
+
+
+def test_locate_c1_sites():
+    loc = WO["wo_locate_c1_sites"]
+    # canonical single-token operands: '( 0 + 23 ) * 47 ='.
+    toks = ["(", "0", "+", "23", ")", "*", "47", "="]
+    r = loc(toks, 23, 47)
+    check("C1 sites ok", r["ok"])
+    check("C1 rparen index", r["rparen"] == 4)
+    check("C1 star index (first * after ))", r["star"] == 5)
+    check("C1 c_operand last token", r["c_operand"] == 6)
+    check("C1 equals index", r["equals"] == 7)
+    check("C1 roles verify B at )", r["roles"]["B_at_rparen"])
+    check("C1 roles verify C after *", r["roles"]["C_after_star"])
+    # multi-token C operand ('4','7') shifts raw indices; content-walk still locates it.
+    split = ["(", "0", "+", "23", ")", "*", "4", "7", "="]
+    r2 = loc(split, 23, 47)
+    check("multi-token C: ok", r2["ok"])
+    check("multi-token C: span both tokens", r2["c_operand_span"] == [6, 7])
+    check("multi-token C: c_operand is last token", r2["c_operand"] == 7)
+    check("multi-token C: equals shifted", r2["equals"] == 8)
+    # multi-token B ('2','3' before the )) — B role still verifies via walk-back.
+    bsplit = ["(", "0", "+", "2", "3", ")", "*", "47", "="]
+    r3 = loc(bsplit, 23, 47)
+    check("multi-token B: ok", r3["ok"])
+    check("multi-token B: rparen after both B tokens", r3["rparen"] == 5)
+    # wrong B (role mismatch) -> not ok (so a caller skips/marks tokenizer_incompatible).
+    rbad = loc(toks, 99, 47)
+    check("wrong B -> roles fail -> not ok", not rbad["ok"] and not rbad["roles"]["B_at_rparen"])
+    # no ')' at all -> not ok, rparen None.
+    rnone = loc(["2", "*", "3", "="], 2, 3)
+    check("no rparen -> rparen None, not ok", rnone["rparen"] is None and not rnone["ok"])
+    # last ')' is the TEST's even when a few-shot prefix has an earlier ')'.
+    fs = ["(", "0", "+", "22", ")", "*", "33", "=", "660",
+          "(", "0", "+", "23", ")", "*", "47", "="]
+    rfs = loc(fs, 23, 47)
+    check("few-shot prefix: picks LAST ) (test expr)", rfs["rparen"] == 13)
+    check("few-shot prefix: star/operand/equals after test )",
+          rfs["star"] == 14 and rfs["c_operand"] == 15 and rfs["equals"] == 16)
+    check("few-shot prefix: ok", rfs["ok"])
+
+
+def test_locate_c1_sites_on_real_render():
+    # build the actual C1 surface and a whitespace-token analog (the GPU cell decodes
+    # real tokens; whitespace tokens are the CPU-testable proxy, as elsewhere here).
+    loc = WO["wo_locate_c1_sites"]
+    rend = {c[0]: c[2] for c in WO["WO_CONDITIONS"]}["C1"]
+    for (B, C) in [(20, 49), (34, 41), (23, 47)]:
+        toks = [t for t in rend(B, C).split(" ") if t != ""]
+        r = loc(toks, B, C)
+        check(f"render C1 ({B},{C}) located ok", r["ok"])
+        check(f"render C1 ({B},{C}) B precedes )", toks[r["rparen"] - 1] == str(B))
+        check(f"render C1 ({B},{C}) equals is last token", r["equals"] == len(toks) - 1)
+
+
+# ------------------------------------------------- §3.3 boundary surfaces + trigger
+def test_boundary_conditions_surfaces():
+    rend = {c[0]: c[2] for c in WO["WO_BOUNDARY_CONDITIONS"]}
+    gt = {c[0]: c[3] for c in WO["WO_BOUNDARY_CONDITIONS"]}
+    aux = WO["wo_aux_operands"]
+    B, C = 23, 47
+    A, D = aux(B, C)
+    check("aux operands deterministic", aux(B, C) == aux(B, C))
+    lo, hi = WO["WO_BAND"]
+    check("aux operands in band", lo <= A <= hi and lo <= D <= hi)
+    check("BD1 surface (A+B)*C", rend["BD1"](B, C) == f"( {A} + {B} ) * {C} =")
+    check("BD1 gt = (A+B)*C", gt["BD1"](B, C) == (A + B) * C)
+    check("BD2 surface A*(B+C)", rend["BD2"](B, C) == f"{A} * ( {B} + {C} ) =")
+    check("BD2 gt = A*(B+C)", gt["BD2"](B, C) == A * (B + C))
+    check("BD3 surface (A*B)+C", rend["BD3"](B, C) == f"( {A} * {B} ) + {C} =")
+    check("BD3 gt = (A*B)+C", gt["BD3"](B, C) == (A * B) + C)
+    check("BD4 surface depth-2 ((0+B)*C)*D", rend["BD4"](B, C) == f"( ( 0 + {B} ) * {C} ) * {D} =")
+    check("BD4 gt = B*C*D", gt["BD4"](B, C) == B * C * D)
+    check("BD5 surface (A+B)*(C+D)", rend["BD5"](B, C) == f"( {A} + {B} ) * ( {C} + {D} ) =")
+    check("BD5 gt = (A+B)*(C+D)", gt["BD5"](B, C) == (A + B) * (C + D))
+    # surfaces render cleanly on the full shared pairs (no crash, all in band).
+    pairs = WO["wo_build_pairs"]()
+    ok_all = True
+    for (b, c) in pairs[:50]:
+        for k in rend:
+            s = rend[k](b, c)
+            ok_all = ok_all and isinstance(s, str) and s.endswith("=")
+    check("all boundary surfaces render on shared pairs", ok_all)
+
+
+def test_boundary_summary():
+    bs = WO["wo_boundary_summary"]
+    # clean trigger: every outer-* surface fails, the additive-outer control works.
+    clean = bs({"BD1": 0.08, "BD2": 0.12, "BD3": 0.85, "BD4": 0.05, "BD5": 0.10})
+    check("clean trigger consistent", clean["consistent"])
+    check("clean trigger mult fails", clean["mult_outer_fails"])
+    check("clean trigger add works", clean["add_outer_works"])
+    check("clean characterization mentions multiplicative outer",
+          "multiplicative outer" in clean["characterization"])
+    check("summary has a row per surface", len(clean["rows"]) == 5)
+    # asymmetry does NOT hold: bracketed product+outer fails too -> not the clean trigger.
+    messy = bs({"BD1": 0.08, "BD2": 0.12, "BD3": 0.10, "BD4": 0.05, "BD5": 0.10})
+    check("additive-outer failing -> add_outer_works false", not messy["add_outer_works"])
+    check("messy -> not the clean characterization",
+          "iff a bracketed sub-expression" not in messy["characterization"])
+    # n/a inputs don't crash and are reported as 'n/a'.
+    partial = bs({"BD1": 0.08})
+    check("partial input -> observed n/a where missing",
+          any(r["observed"] == "n/a" for r in partial["rows"]))
+
+
+# ------------------------------------------------- §3.4 demo builders + format-cue
+def test_demo_builders():
+    dr = WO["wo_demo_render"]
+    fr = WO["wo_fewshot_render"]
+    rend = {c[0]: c[2] for c in WO["WO_CONDITIONS"]}["C1"]
+    gt = {c[0]: c[3] for c in WO["WO_CONDITIONS"]}["C1"]
+    pool = WO["wo_build_pairs"]()
+    tp = pool[0]
+    # invariant: a 'correct' demo prompt IS the existing few-shot prompt (same pairs).
+    check("demo_render correct == fewshot_render",
+          dr("correct", rend, gt, 4, tp, pool, 3) == fr(rend, gt, 4, tp, pool, 3))
+    # every type: 5 lines (4 demos + test), last line is the canonical bare test prompt.
+    for t in WO["WO_DEMO_TYPES"]:
+        p = dr(t, rend, gt, 4, tp, pool, 9)
+        lines = p.splitlines()
+        check(f"{t}: 4 demos + test = 5 lines", len(lines) == 5)
+        check(f"{t}: last line is bare canonical C1", lines[-1] == rend(*tp))
+        check(f"{t}: prompt ends at '=' no trailing space",
+              p.endswith("=") and not p.endswith(" "))
+        check(f"{t}: deterministic given seed", p == dr(t, rend, gt, 4, tp, pool, 9))
+    # wrong_answer: same LHS surface as correct, but the answer is WRONG, same #digits.
+    wlines = dr("wrong_answer", rend, gt, 3, tp, pool, 11).splitlines()[:-1]
+    clines = dr("correct", rend, gt, 3, tp, pool, 11).splitlines()[:-1]
+    ok_w = True
+    for wl, cl in zip(wlines, clines):
+        wlhs, wans = wl.rsplit(" ", 1)
+        clhs, cans = cl.rsplit(" ", 1)
+        ok_w = ok_w and (wlhs == clhs) and (wans != cans) and (len(wans) == len(cans))
+    check("wrong_answer: same LHS as correct, wrong same-#digits answer", ok_w)
+    # scrambled_format: same token multiset on the LHS, ends with '= <correct value>'.
+    import re as _re
+    sline = dr("scrambled_format", rend, gt, 1, tp, pool, 13).splitlines()[0]
+    cline = dr("correct", rend, gt, 1, tp, pool, 13).splitlines()[0]
+    check("scrambled same token multiset as correct demo",
+          sorted(sline.split()) == sorted(cline.split()))
+    check("scrambled ends with '= <correct value>'",
+          _re.search(r"= (\d+)$", sline).group(1) == cline.split()[-1])
+    # random_text: length-matched (same whitespace-token count), NO digits, no '='.
+    rline = dr("random_text", rend, gt, 1, tp, pool, 17).splitlines()[0]
+    check("random_text length-matched (token count == correct demo)",
+          len(rline.split()) == len(cline.split()))
+    check("random_text has no digits", not any(ch.isdigit() for ch in rline))
+    check("random_text has no '='", "=" not in rline)
+    check("gt_wrong is wrong + same #digits",
+          WO["wo_gt_wrong"](23, 47) != 23 * 47
+          and len(str(WO["wo_gt_wrong"](23, 47))) == len(str(23 * 47)))
+
+
+def test_format_cue_verdict():
+    v = WO["wo_format_cue_verdict"]
+    # wrong ~= correct AND random flat -> FORMAT_PRIMED (the surprising WO#3 hint).
+    fp = v({"correct": 0.92, "wrong_answer": 0.88, "scrambled_format": 0.80,
+            "random_text": 0.30}, zeroshot_acc=0.27)
+    check("format-primed label", fp["label"] == "FORMAT_PRIMED")
+    check("format-primed: wrong recovers", fp["recovers"]["wrong_answer"])
+    check("format-primed: random does not recover", not fp["recovers"]["random_text"])
+    # only correct recovers -> CONTENT_DRIVEN.
+    cd = v({"correct": 0.92, "wrong_answer": 0.30, "scrambled_format": 0.30,
+            "random_text": 0.28}, zeroshot_acc=0.27)
+    check("content-driven label", cd["label"] == "CONTENT_DRIVEN")
+    # neither recovers / ambiguous -> MIXED.
+    mx = v({"correct": 0.35, "wrong_answer": 0.33, "random_text": 0.30}, zeroshot_acc=0.27)
+    check("ambiguous -> MIXED", mx["label"] == "MIXED")
+    # missing zeroshot -> MIXED (can't judge recovery), no crash.
+    check("missing zeroshot -> MIXED",
+          v({"correct": 0.9, "wrong_answer": 0.9}, zeroshot_acc=None)["label"] == "MIXED")
+
+
+# ------------------------------------------------- §3.5 refined error classifier
+def test_classify_error_detail():
+    ed = WO["wo_classify_error_detail"]
+    B, C = 23, 47                          # prod=1081, B+C=70
+    check("correct (==B*C)", ed(1081, B, C) == "correct")
+    check("parse_fail (None)", ed(None, B, C) == "parse_fail")
+    check("equals_B", ed(23, B, C) == "equals_B")
+    check("equals_C", ed(47, B, C) == "equals_C")
+    check("equals_B_plus_C", ed(70, B, C) == "equals_B_plus_C")
+    check("near_product (within 10%)", ed(1040, B, C) == "near_product")  # |Δ|/1081=0.038
+    check("near_product upper edge (just inside 10%)", ed(1180, B, C) == "near_product")  # 0.0916
+    check("right_magnitude (4 digits, not near)", ed(1500, B, C) == "right_magnitude")
+    check("unrelated (1 digit, far)", ed(7, B, C) == "unrelated")
+    check("unrelated (5 digits)", ed(50000, B, C) == "unrelated")
+    # priority: exact product beats near_product/right_magnitude.
+    check("exact product not mislabeled near", ed(1081, B, C) == "correct")
+    # exact-value buckets beat the fuzzy ones (B sits inside the magnitude bucket band?).
+    check("equals_B beats fuzzy buckets", ed(B, B, C) == "equals_B")
+    # categories list is exhaustive for these.
+    cats = set(WO["WO_ERROR_DETAIL_CATS"])
+    for pred in [None, 1081, 23, 47, 70, 1040, 1500, 7]:
+        check(f"category for {pred} is registered", ed(pred, B, C) in cats)
+
+
 def main():
     for fn in sorted(g for g in globals() if g.startswith("test_")):
         print(f"\n{fn}:")
