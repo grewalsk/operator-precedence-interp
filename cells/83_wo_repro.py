@@ -65,6 +65,8 @@ _deliverables = [
     # WO#3 few-shot decodability probe (§ decodability contrast):
     "fewshot_decodability_instruct.json", "fewshot_decodability_base.json",
     "fewshot_decodability_summary.csv",
+    # WO#3 follow-ups: by-layer curve + non-repairing control (R1 vs R2):
+    "fewshot_decodability_by_layer.csv", "fewshot_decodability_control.csv",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:
