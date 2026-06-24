@@ -1,0 +1,7 @@
+tag,shots,best_layer,r2_best,n_used,n_used_ok
+base,0,3,0.998893,400,True
+base,2,1,0.994804,400,True
+base,4,1,0.994847,400,True
+instruct,0,3,0.998698,400,True
+instruct,2,1,0.993845,400,True
+instruct,4,1,0.993834,400,True

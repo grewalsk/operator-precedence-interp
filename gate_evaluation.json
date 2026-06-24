@@ -1,0 +1,93 @@
+{
+  "model": "meta-llama/Llama-3.1-8B-Instruct",
+  "format": "bare-continuation",
+  "band": [
+    20,
+    49
+  ],
+  "n": 400,
+  "seed": 0,
+  "inputs": {
+    "acc": {
+      "C0": 0.8475,
+      "C1": 0.265,
+      "C2": 0.6775,
+      "C3": 0.755,
+      "C4": 0.9075,
+      "C5": 0.5425,
+      "C6": 1.0,
+      "C7": 0.19,
+      "C8": 0.785
+    },
+    "corr": {
+      "C0": 0.9821394418521865,
+      "C1": -0.04314686164123931,
+      "C2": 0.2300763091325882,
+      "C3": 0.5456526288569593,
+      "C4": 0.9589060838555952,
+      "C5": 0.28169715245859145,
+      "C6": 1.0,
+      "C7": 0.16201028867646527,
+      "C8": 0.9099032561614803
+    },
+    "parse_fail": {
+      "C0": 0.0,
+      "C1": 0.0,
+      "C2": 0.0,
+      "C3": 0.0,
+      "C4": 0.0,
+      "C5": 0.030000000000000027,
+      "C6": 0.0,
+      "C7": 0.03500000000000003,
+      "C8": 0.0
+    },
+    "acc_delta_C1_C2": 0.4125,
+    "jaccard_C1_C2": 0.35611510791366907
+  },
+  "gates": {
+    "G_floor": {
+      "definition": "acc(C0) >= 0.90",
+      "value": 0.8475,
+      "pass": false
+    },
+    "G_neutral": {
+      "definition": "acc(C1) >= 0.85 AND |acc(C1)-acc(C4)| <= 0.05",
+      "value": {
+        "acc_C1": 0.265,
+        "abs_C1_minus_C4": 0.6425
+      },
+      "pass": false
+    },
+    "G_symmetry": {
+      "definition": "|acc(C1)-acc(C2)| <= 0.05",
+      "value": 0.4125,
+      "pass": false
+    },
+    "G_quantity": {
+      "definition": "corr(C1) >= 0.80",
+      "value": -0.04314686164123931,
+      "pass": false
+    },
+    "G_surface": {
+      "definition": "acc(C7) >= 0.70  (SCOPE FLAG, not a hard abort)",
+      "value": 0.19,
+      "pass": false
+    },
+    "G_support": {
+      "definition": "Jaccard(C1,C2) >= 0.85",
+      "value": 0.35611510791366907,
+      "pass": false
+    }
+  },
+  "hard_gate_AND": false,
+  "failed_hard_gates": [
+    "G_floor",
+    "G_neutral",
+    "G_symmetry",
+    "G_quantity",
+    "G_support"
+  ],
+  "g_surface_pass": false,
+  "localization_verdict": "INVALID",
+  "scope": "localization invalid; hard gates failed: ['G_floor', 'G_neutral', 'G_symmetry', 'G_quantity', 'G_support']"
+}
