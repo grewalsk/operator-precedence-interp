@@ -62,6 +62,9 @@ _deliverables = [
     "salvage_c6_to_c1_instruct.json", "salvage_c6_to_c1_base.json",
     "confidence_intervals.json", "fewshot_control.csv",
     "wrong_output_distribution.csv",
+    # WO#3 few-shot decodability probe (§ decodability contrast):
+    "fewshot_decodability_instruct.json", "fewshot_decodability_base.json",
+    "fewshot_decodability_summary.csv",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:

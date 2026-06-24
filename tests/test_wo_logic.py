@@ -355,6 +355,44 @@ def test_shuffle_control_decorrelates():
     check("shuffle deterministic given seed", np.array_equal(sc(Bvals, 5), sc(Bvals, 5)))
 
 
+# ------------------------------------------------- WO#3 few-shot probe pure logic
+def test_fewshot_probe_site_finder():
+    # Hazard #1: under a few-shot prefix the FIRST ')' belongs to a SHOT; the probe
+    # site is the TEST expression's ')' = the LAST one. Verify on a REAL rendered
+    # 2-shot prompt via a tokenizer-free whitespace analog.
+    lri = WO["wo_last_rparen_index"]
+    rend = {c[0]: c[2] for c in WO["WO_CONDITIONS"]}["C1"]
+    gt = lambda b, c: b * c
+    pool = WO["wo_build_pairs"]()
+    test_pair = pool[0]
+    B = test_pair[0]
+    prompt = WO["wo_fewshot_render"](rend, gt, 2, test_pair, pool, seed=0)
+    toks = [t for t in prompt.replace("\n", " \n ").split(" ") if t != ""]
+    idx = lri([t.strip() for t in toks])
+    n_rparen = sum(1 for t in toks if t.strip() == ")")
+    check("2-shot prompt has 3 brackets (2 shots + test)", n_rparen == 3)
+    check("finder returns a ')' index", idx is not None and toks[idx].strip() == ")")
+    last_rparen = max(k for k, t in enumerate(toks) if t.strip() == ")")
+    check("finder picks the LAST ')' (the test expr), not a shot", idx == last_rparen)
+    check("last ')' closes the TEST bracket (test B precedes it)", toks[idx - 1].strip() == str(B))
+    # 0-shot prompt has exactly one ')', and it is the test's.
+    p0 = WO["wo_fewshot_render"](rend, gt, 0, test_pair, pool, seed=0)
+    t0 = [t for t in p0.split(" ") if t != ""]
+    i0 = lri([t.strip() for t in t0])
+    check("0-shot: single ')' is the test's", i0 is not None and t0[i0 - 1].strip() == str(B))
+
+
+def test_fsprobe_trend():
+    tr = WO["wo_fsprobe_trend"]
+    check("stable -> DECODABLE_IN_BOTH", tr(0.90, 0.90, 0.90)[0] == "DECODABLE_IN_BOTH")
+    check("small wobble still DECODABLE_IN_BOTH", tr(0.90, 0.92, 0.88)[0] == "DECODABLE_IN_BOTH")
+    check("rise -> REPRESENTATION_IMPROVES", tr(0.70, 0.85, 0.90)[0] == "REPRESENTATION_IMPROVES")
+    check("drop below 0-shot -> PROBE_SITE_SUSPECT", tr(0.90, 0.70, 0.70)[0] == "PROBE_SITE_SUSPECT")
+    check("low absolute -> PROBE_SITE_SUSPECT", tr(0.40, 0.25, 0.25)[0] == "PROBE_SITE_SUSPECT")
+    check("missing level -> INCONCLUSIVE", tr(0.9, None, 0.9)[0] == "INCONCLUSIVE")
+    check("intermediate -> MIXED", tr(0.90, 0.83, 0.90)[0] == "MIXED")
+
+
 def main():
     for fn in sorted(g for g in globals() if g.startswith("test_")):
         print(f"\n{fn}:")

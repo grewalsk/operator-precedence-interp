@@ -660,6 +660,63 @@ def wo_shuffle_control(values, seed=0):
 
 
 # ----------------------------------------------------------------------------
+# 8c) WORK ORDER #3 — few-shot decodability probe pure logic. The probe SITE under
+#     a few-shot prefix is the LAST ')' (the test expression is appended last; the
+#     FIRST ')' belongs to a SHOT — Hazard #1). And the 0->2->4-shot CV-R^2 trend
+#     classifier (decision logic, so it lives here with a test, per the two-tier
+#     rule). Both forward-pass-FREE; the GPU cell (82d) is thin orchestration.
+# ----------------------------------------------------------------------------
+def wo_last_rparen_index(token_strs):
+    """Index of the LAST ')' in a list of per-token decoded strings (already
+    stripped). Under a few-shot prefix the prompt is
+        ( 0 + b1 ) * c1 = a1 \\n ... \\n ( 0 + B ) * C =
+    so the FIRST ')' closes a SHOT's bracket; the TEST expression's ')' is the LAST
+    one (the test line is appended last, with no answer after its ')'). Returns
+    None if there is no ')'. (GPU cell builds token_strs via tokenizer.decode.)"""
+    last = None
+    for i, t in enumerate(token_strs):
+        if (t.strip() if isinstance(t, str) else t) == ")":
+            last = i
+    return last
+
+
+def wo_fsprobe_trend(r2_0, r2_2, r2_4, stable_tol=0.05, rise_thr=0.10,
+                     collapse_thr=0.10, low_floor=0.30):
+    """Classify the 0->2->4-shot best-layer CV-R^2 trend for B decodability at the
+    ')' site. Returns (label, detail). DECISION LOGIC ONLY — no causal claim.
+        PROBE_SITE_SUSPECT  : few-shot R^2 collapses (drops > collapse_thr below
+                              0-shot, or falls under low_floor) -> likely the
+                              LAST-')' finder is wrong (Hazard #1); re-check before
+                              concluding anything.
+        REPRESENTATION_IMPROVES : few-shot raises R^2 by > rise_thr -> few-shot
+                              changes the ENCODING, not only its use -> reframe.
+        DECODABLE_IN_BOTH   : R^2 stays within stable_tol of 0-shot at 2 AND 4 shot
+                              -> representation present in both regimes; few-shot
+                              changes USE, not encoding (the paper-strengthening case).
+        MIXED               : intermediate; report the numbers as-is.
+        INCONCLUSIVE        : a level is missing (None)."""
+    vals = [r2_0, r2_2, r2_4]
+    if any(v is None for v in vals):
+        return ("INCONCLUSIVE", "missing R^2 at one or more shot levels")
+    fs = [float(r2_2), float(r2_4)]
+    r0 = float(r2_0)
+    msg = f"0-shot={r0:.3f}, 2-shot={fs[0]:.3f}, 4-shot={fs[1]:.3f}"
+    if any(v < r0 - collapse_thr for v in fs) or min(fs) < low_floor:
+        return ("PROBE_SITE_SUSPECT",
+                f"few-shot R^2 collapses ({msg}); re-check the LAST-')' finder "
+                "(Hazard #1) before concluding.")
+    if any(v - r0 > rise_thr for v in fs):
+        return ("REPRESENTATION_IMPROVES",
+                f"few-shot raises B decodability ({msg}); few-shot changes the "
+                "REPRESENTATION, not only its downstream use — reframe the claim.")
+    if all(abs(v - r0) <= stable_tol for v in fs):
+        return ("DECODABLE_IN_BOTH",
+                f"B stays decodable across regimes ({msg}); few-shot changes USE, "
+                "not encoding.")
+    return ("MIXED", f"intermediate trend ({msg}); report as-is.")
+
+
+# ----------------------------------------------------------------------------
 # 9) Inline self-test (runs on every notebook execution; CPU only, ~instant).
 #    Mirrors tests/test_wo_logic.py so a notebook run also fails loudly if the
 #    decision logic is wrong. Uses the PUBLISHED base numbers as fixtures.
@@ -723,6 +780,16 @@ def _wo_selftest():
         wo_fewshot_render(_rC1, _gC1, 2, (20, 21), _pool, 1)
     assert not np.array_equal(
         wo_shuffle_control(np.arange(50), 0), np.arange(50))
+
+    # WO#3 few-shot probe pure logic.
+    assert wo_last_rparen_index(["(", "0", "+", "22", ")", "*", "33", "=",
+                                 "(", "0", "+", "23", ")", "*", "47", "="]) == 12
+    assert wo_last_rparen_index(["(", "0", "+", "23", ")", "=", "="]) == 4
+    assert wo_last_rparen_index(["a", "b"]) is None
+    assert wo_fsprobe_trend(0.90, 0.90, 0.90)[0] == "DECODABLE_IN_BOTH"
+    assert wo_fsprobe_trend(0.70, 0.85, 0.90)[0] == "REPRESENTATION_IMPROVES"
+    assert wo_fsprobe_trend(0.90, 0.20, 0.20)[0] == "PROBE_SITE_SUSPECT"
+    assert wo_fsprobe_trend(0.90, None, 0.9)[0] == "INCONCLUSIVE"
     return True
 
 
