@@ -138,9 +138,9 @@ for ax, _tag in zip(axes, ("base", "instruct")):
     xs = range(_NL)
     g0 = WO_FSPROBE[_tag][0]["r2_by_layer"]
     gr = WO_FSPROBE[_tag][_S]["r2_by_layer"]
-    gc = WO_FSCTRL[(_tag, _S)]["r2_by_layer"]
+    gctrl = WO_FSCTRL[(_tag, _S)]["r2_by_layer"]   # NB: NOT `gc` — that shadows the gc module
     for g, lab in ((g0, "0-shot (fails)"), (gr, f"{_S}-shot real (repairs)"),
-                   (gc, f"{_S}-shot control (no repair)")):
+                   (gctrl, f"{_S}-shot control (no repair)")):
         ax.plot(xs, [g.get(str(L), g.get(L, np.nan)) for L in xs], "o-", ms=3, label=lab)
     ax.axvspan(_ML, _NL - 1, color="orange", alpha=0.12)
     ax.axvline(30, color="k", ls="--", lw=1)

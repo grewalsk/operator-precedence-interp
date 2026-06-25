@@ -78,6 +78,9 @@ def wo_load_model(tag):
     uncentered resid — IDENTICAL to the validated instrument). Idempotent: a no-op
     if the requested tag is already live."""
     global model, tokenizer, WO_ACTIVE_TAG, USING_FALLBACK
+    import gc                       # local rebind: defensive against a global `gc` that some
+    #                                other cell's loop variable may have shadowed to a dict
+    #                                (then gc.collect() in the teardown would AttributeError).
     if tag not in WO_MODEL_REGISTRY:
         raise ValueError(f"unknown model tag {tag!r}; expected {list(WO_MODEL_REGISTRY)}")
     name = WO_MODEL_REGISTRY[tag]
