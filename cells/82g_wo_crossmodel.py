@@ -102,8 +102,14 @@ def _xm_run_model(tag):
     ck = f"wo_crossmodel_{tag}"
     if has_artifact(ck, "json"):
         out = load_json(ck)
-        log(f"WO#4 cross-model [{tag}]: cached — reused (label={out.get('label')}).")
-        return out
+        # Reuse only a SUCCESSFUL cached summary. A cached failure (access_denied /
+        # load_failed / error) is RETRIED on re-run — so after fixing a token, license,
+        # or environment issue, you just re-run this cell instead of hunting for stale
+        # JSONs on Drive. (A truly-gated model just fails fast again at the auth step.)
+        if out.get("status") == "ok":
+            log(f"WO#4 cross-model [{tag}]: cached OK — reused (label={out.get('label')}).")
+            return out
+        log(f"WO#4 cross-model [{tag}]: prior {out.get('status')} cached — RETRYING.")
 
     name = WO_MODEL_REGISTRY.get(tag, tag)
     # ---- 1) load (gated/unavailable/load-error -> report, don't crash) ----
