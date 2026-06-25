@@ -11,11 +11,11 @@ gated Instruct format: bare-continuation
 models:
   base     : meta-llama/Llama-3.1-8B  (revision=d04e592bb4f6aa9cfee91e2e20afa771667e1d4b)
   instruct : meta-llama/Llama-3.1-8B-Instruct  (revision=0e9e39f249a16976918f6564b8830bc894c89659)
-  qwen25_7b_it: Qwen/Qwen2.5-7B-Instruct  (revision=None)
+  qwen25_7b_it: Qwen/Qwen2.5-7B-Instruct  (revision=a09a35458c702b33eeacc393d103063234e8bc28)
   gemma2_9b_it: google/gemma-2-9b-it  (revision=None)
-  mistral_7b_it: mistralai/Mistral-7B-Instruct-v0.3  (revision=None)
+  mistral_7b_it: mistralai/Mistral-7B-Instruct-v0.3  (revision=c170c708c41dac9275d15a8fff4eca08d52bab71)
   llama32_1b_it: meta-llama/Llama-3.2-1B-Instruct  (revision=None)
-  llama32_3b_it: meta-llama/Llama-3.2-3B-Instruct  (revision=None)
+  llama32_3b_it: meta-llama/Llama-3.2-3B-Instruct  (revision=0cb88a4f764b7a12671c53f0838cd831a0843b95)
 
 versions:
   transformer_lens : 3.3.0
@@ -41,11 +41,11 @@ localization verdict : INVALID
 base 2x2 verdict     : COMPOSE_SPECIFIC
 
 WO#4 cross-model replication (shared WO_PAIRS):
-  qwen25_7b_it  : access_denied          ACCESS_DENIED (gated / no HF_TOKEN / unavailable)
+  qwen25_7b_it  : ok                     OUT_OF_SCOPE (can't even do C4/C6 — capability, not composition)
   gemma2_9b_it  : ok                     REPLICATES_CORE
-  mistral_7b_it : access_denied          ACCESS_DENIED (gated / no HF_TOKEN / unavailable)
+  mistral_7b_it : ok                     OUT_OF_SCOPE (can't even do C4/C6 — capability, not composition)
   llama32_1b_it : ok                     OUT_OF_SCOPE (can't even do C4/C6 — capability, not composition)
-  llama32_3b_it : access_denied          ACCESS_DENIED (gated / no HF_TOKEN / unavailable)
+  llama32_3b_it : ok                     REPLICATES_FULL
   boundary aux-operand seed : 7
   WO#4 boundary surfaces (rendered for B=23,C=47):
     BD1  addsum_times       ( 26 + 23 ) * 47 =             -> gt 2303
