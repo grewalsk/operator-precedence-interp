@@ -1,0 +1,11 @@
+tag,shots,demo_type,c1_acc,zeroshot_c1,delta_vs_zeroshot,recovers,verdict
+base,4,correct,0.8825,0.5075,0.375,True,CONTENT_DRIVEN
+base,4,wrong_answer,0.265,0.5075,-0.2425,False,CONTENT_DRIVEN
+base,4,scrambled_format,0.365,0.5075,-0.1425,False,CONTENT_DRIVEN
+base,4,random_text,0.6675,0.5075,0.16,False,CONTENT_DRIVEN
+instruct,4,correct,0.915,0.265,0.65,True,MIXED
+instruct,4,wrong_answer,0.6375,0.265,0.3725,True,MIXED
+instruct,4,scrambled_format,0.4375,0.265,0.1725,False,MIXED
+instruct,4,random_text,0.7125,0.265,0.4475,True,MIXED
+# verdict[base],CONTENT_DRIVEN,"content-driven: only correct demos recover C1; wrong-answer demos do not — the model uses the demos' VALUES, not just their format."
+# verdict[instruct],MIXED,"mixed/ambiguous: the recovery pattern across demo types is not clean — report the per-type accuracies as-is."

@@ -1,0 +1,13 @@
+tag,key,surface,outer_op,predict,acc,observed,corr_BC,parse_fail,ref_C1,ref_C4
+base,BD1,( A + B ) * C =,*,fail,0.005,fails,0.0410431,0,0.5075,0.89
+base,BD2,A * ( B + C ) =,*,fail,0,fails,0.813488,0,0.5075,0.89
+base,BD3,( A * B ) + C =,+,pass,0.0375,fails,0.519358,0,0.5075,0.89
+base,BD4,( ( 0 + B ) * C ) * D =,*,fail,0.0175,fails,-0.0437769,0,0.5075,0.89
+base,BD5,( A + B ) * ( C + D ) =,*,pass_or_fail,0,fails,0.317418,0,0.5075,0.89
+instruct,BD1,( A + B ) * C =,*,fail,0,fails,0.355096,0.0075,0.265,0.9075
+instruct,BD2,A * ( B + C ) =,*,fail,0,fails,0.14991,0,0.265,0.9075
+instruct,BD3,( A * B ) + C =,+,pass,0.0075,fails,0.486588,0,0.265,0.9075
+instruct,BD4,( ( 0 + B ) * C ) * D =,*,fail,0,fails,,0.0025,0.265,0.9075
+instruct,BD5,( A + B ) * ( C + D ) =,*,pass_or_fail,0,fails,0.388729,0,0.265,0.9075
+# trigger[base],"bracketed sub-expressions feeding '*' collapse, but the additive outer control did not cleanly pass — report per-surface"
+# trigger[instruct],"bracketed sub-expressions feeding '*' collapse, but the additive outer control did not cleanly pass — report per-surface"
