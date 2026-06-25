@@ -106,28 +106,44 @@ def _xm_run_model(tag):
         return out
 
     name = WO_MODEL_REGISTRY.get(tag, tag)
-    # ---- 1) load (gated/unavailable -> report, don't crash) ----
+    # ---- 1) load (gated/unavailable/load-error -> report, don't crash) ----
     try:
         wo_load_model(tag)
     except Exception as e:
-        out = {"tag": tag, "model": name, "status": "access_denied",
-               "error": f"{type(e).__name__}: {str(e)[:200]}", "format": "n/a",
-               "parity_ok": None, "label": "ACCESS_DENIED (gated / no HF_TOKEN / unavailable)"}
+        _emsg = f"{type(e).__name__}: {str(e)[:300]}"
+        _low = _emsg.lower()
+        # distinguish TRUE gating (accept-the-license) from any OTHER load failure
+        # (version/ABI clash, download error, OOM) — the old blanket 'access_denied'
+        # lied about ungated models. Auth markers: 401/403/gated/restricted/awaiting.
+        _is_auth = any(s in _low for s in ("401", "403", "gatedrepo", "gated repo",
+                                           "restricted", "awaiting", "must accept",
+                                           "unauthorized", "permission"))
+        out = {"tag": tag, "model": name,
+               "status": "access_denied" if _is_auth else "load_failed",
+               "error": _emsg, "format": "n/a", "parity_ok": None,
+               "label": ("ACCESS_DENIED (accept the license at huggingface.co/" + name + ")"
+                         if _is_auth else f"LOAD_FAILED ({type(e).__name__}) — see error field")}
         save_json(ck, out)
-        log(f"WO#4 cross-model [{tag}]: ACCESS DENIED / load failed ({out['error']}). Skipped.")
+        log(f"WO#4 cross-model [{tag}]: "
+            f"{'ACCESS DENIED (gating)' if _is_auth else 'LOAD FAILED'} — {_emsg}")
         return out
 
     try:
         # ---- 2) tokenizer re-validation (parity is recorded, not a hard abort) ----
         parity_ok, parity_bad = wo_assert_parity(WO_PAIRS, _xm_renderC1, _xm_renderC2)
 
-        # ---- 3) degeneracy guard: bare C0 parse-fail -> chat fallback ----
-        _c0_bare = wo_run_battery(tag, [c for c in _xm_keyconds if c[0] == "C0"],
-                                  WO_PAIRS, cache_tag=tag)
-        c0_pf = _c0_bare["C0"]["parse_fail_rate"]
+        # ---- 3) degeneracy guard: bare parse-fail -> chat fallback ----
+        # Check BOTH C0 (easy) AND C1 (hard): a model can answer C0 fine yet CHAT on
+        # the harder C1 (Gemma did: C0 ok, C1 48% parse-fail), which silently degrades
+        # the headline number. Trigger chat-wrap if EITHER is degenerate.
+        _degen_bare = wo_run_battery(tag, [c for c in _xm_keyconds if c[0] in ("C0", "C1")],
+                                     WO_PAIRS, cache_tag=tag)
+        c0_pf = _degen_bare["C0"]["parse_fail_rate"]
+        c1_pf = _degen_bare["C1"]["parse_fail_rate"]
+        degen_pf = max(c0_pf, c1_pf)
         fmt, cache_tag, wrap = "bare-continuation", tag, (lambda s: s)
         chat_ok = hasattr(tokenizer, "apply_chat_template")
-        if c0_pf > WO_XM_BARE_DEGEN_PF and chat_ok:
+        if degen_pf > WO_XM_BARE_DEGEN_PF and chat_ok:
             wrap = _xm_chat_wrap_factory()
             # single-BOS sanity on the wrapped, scored tokenization (cell 79 pattern).
             _pids = tokenizer(wrap(_xm_renderC1(23, 47)),
@@ -138,14 +154,15 @@ def _xm_run_model(tag):
             cp_ok, _ = wo_assert_parity(WO_PAIRS,
                                         (lambda B, C: wrap(_xm_renderC1(B, C))),
                                         (lambda B, C: wrap(_xm_renderC2(B, C))))
-            fmt = (f"chat-wrapped (bare C0 parse-fail={c0_pf:.2f}; "
+            fmt = (f"chat-wrapped (bare parse-fail C0={c0_pf:.2f}/C1={c1_pf:.2f}; "
                    f"BOS={_bos_n}; wrapped-parity={'OK' if cp_ok else 'BROKEN'})")
             cache_tag = f"{tag}_chat"
             parity_ok = bool(cp_ok)
-            log(f"WO#4 [{tag}]: bare degenerate (C0 pf={c0_pf:.2f}) -> chat-wrapped "
-                f"(BOS={_bos_n}, wrapped-parity={cp_ok}).")
-        elif c0_pf > WO_XM_BARE_DEGEN_PF:
-            fmt = f"bare-continuation (DEGENERATE C0 pf={c0_pf:.2f}; no chat template)"
+            log(f"WO#4 [{tag}]: bare degenerate (C0 pf={c0_pf:.2f}, C1 pf={c1_pf:.2f}) "
+                f"-> chat-wrapped (BOS={_bos_n}, wrapped-parity={cp_ok}).")
+        elif degen_pf > WO_XM_BARE_DEGEN_PF:
+            fmt = (f"bare-continuation (DEGENERATE C0 pf={c0_pf:.2f}/C1 pf={c1_pf:.2f}; "
+                   f"no chat template)")
             log(f"WO#4 [{tag}]: bare degenerate and no chat template — reporting bare anyway.")
 
         # ---- 4) key battery + branch-B controls in the chosen format ----
@@ -297,12 +314,19 @@ _nonrepl = [r["tag"] for r in _xm_csv_rows
             if r["status"] in ("ok", "reference (prior WO run)")
             and not r["replicates_core"] and not r["out_of_scope"]]
 _oos = [r["tag"] for r in _xm_csv_rows if r["out_of_scope"]]
-_skipped = [r["tag"] for r in _xm_csv_rows if r["status"] in ("access_denied", "error")]
+_denied = [r["tag"] for r in _xm_csv_rows if r["status"] == "access_denied"]
+_failed = [r["tag"] for r in _xm_csv_rows if r["status"] in ("load_failed", "error")]
 print(f"  replicates_full : {_repl_full}")
 print(f"  replicates_core : {_repl_core}")
 print(f"  NON-replicators : {_nonrepl}   (reported, NOT cherry-picked)")
 print(f"  out_of_scope    : {_oos}   (can't do C4/C6 — capability, reported separately)")
-print(f"  skipped         : {_skipped}   (access_denied / error — reported, run continued)")
+print(f"  ACCESS_DENIED   : {_denied}   (true gating — accept the license)")
+print(f"  LOAD_FAILED     : {_failed}   (NOT gating — real load error, see below)")
+# surface the actual error for any non-gating failure so it's never buried again.
+for _tag in CFG.get("wo_crossmodel_tags", []):
+    _r = WO_XM_RESULTS.get(_tag, {})
+    if _r.get("status") in ("load_failed", "error"):
+        print(f"     [{_tag}] {_r.get('error', '(no error captured)')}")
 _n_added = sum(1 for r in _xm_csv_rows if r["tag"] in CFG["wo_crossmodel_tags"]
                and r["status"] == "ok")
 print(f"  >>> {_n_added} additional model(s) batteried on the shared pairs "
