@@ -1,0 +1,53 @@
+{
+  "tag": "instruct",
+  "experiment": "WO5.1c_fullproduct",
+  "reused_capture": true,
+  "regL_c4": 4,
+  "late_L": 26,
+  "inject_k": 1,
+  "first_tok_shared_frac": 1.0,
+  "cells": {
+    "swap_C4": {
+      "fullprod_logprob_delta": -0.0006787895818706602,
+      "ci": [
+        -0.01779580459310091,
+        0.01675402209782622
+      ],
+      "emit_Pprime_rate": 0.0,
+      "n": 200,
+      "gen_n": 40
+    },
+    "inject_C4_L4": {
+      "fullprod_logprob_delta": 0.0023158206668449565,
+      "ci": [
+        -0.008860594288635183,
+        0.012512070308599502
+      ],
+      "emit_Pprime_rate": 0.0,
+      "n": 200,
+      "gen_n": 40
+    },
+    "inject_C4_L26": {
+      "fullprod_logprob_delta": -0.0060564386658370495,
+      "ci": [
+        -0.017241076350648657,
+        0.00492707665324269
+      ],
+      "emit_Pprime_rate": 0.0,
+      "n": 200,
+      "gen_n": 40
+    },
+    "inject_C1_L4": {
+      "fullprod_logprob_delta": 1.9896591055952013,
+      "ci": [
+        1.7093345963764588,
+        2.2818425711284798
+      ],
+      "emit_Pprime_rate": 0.0,
+      "n": 200,
+      "gen_n": 40
+    }
+  },
+  "verdict": "SITE_OR_METRIC_STILL_BROKEN",
+  "pair_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf"
+}

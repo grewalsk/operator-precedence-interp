@@ -1,0 +1,9 @@
+tag,verdict,intervention,first_tok_shared,fullprod_logprob_delta,emit_Pprime_rate
+base,SITE_OR_METRIC_STILL_BROKEN,swap_C4,1,-0.200111,0
+base,SITE_OR_METRIC_STILL_BROKEN,inject_C4_L4,1,0.00892163,0
+base,SITE_OR_METRIC_STILL_BROKEN,inject_C4_L26,1,0.0689001,0
+base,SITE_OR_METRIC_STILL_BROKEN,inject_C1_L4,1,1.98671,0
+instruct,SITE_OR_METRIC_STILL_BROKEN,swap_C4,1,-0.00067879,0
+instruct,SITE_OR_METRIC_STILL_BROKEN,inject_C4_L4,1,0.00231582,0
+instruct,SITE_OR_METRIC_STILL_BROKEN,inject_C4_L26,1,-0.00605644,0
+instruct,SITE_OR_METRIC_STILL_BROKEN,inject_C1_L4,1,1.98966,0
