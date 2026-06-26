@@ -1188,6 +1188,405 @@ WO_ERROR_DETAIL_CATS = ["correct", "equals_B", "equals_C", "equals_B_plus_C",
                         "near_product", "right_magnitude", "unrelated", "parse_fail"]
 
 
+# ============================================================================
+# 8e) WORK ORDER #5 — CONTRAST-FREE CAUSAL STEERING + PROBE SELECTIVITY (pure).
+# ----------------------------------------------------------------------------
+# Forward-pass-FREE math for the two WO#5 experiments. The GPU/CPU cells (82l/
+# 82m) are thin orchestration over these verified functions; each is unit-tested
+# in tests/test_wo_logic.py and inline below BEFORE any A100 time.
+#
+#   EXPERIMENT A (cell 82l, GPU) — a contrast-free causal test at the answer site.
+#     Fit a ridge probe (the SAME dual-ridge instrument as wo_cv_r2) on a TRAIN
+#     half to get a UNIT direction w-hat and a value<->coordinate mapping; on the
+#     held-out TEST half, activation-steer the residual along w-hat to write a
+#     target VALUE in, then score the GROUND-TRUTH product's first-answer-token
+#     logit. Every item yields a logit Δ regardless of argmax — this is what kills
+#     the n=0 failure mode of argmax/flip-only metrics on the failing regime.
+#
+#   EXPERIMENT B (cell 82m, CPU) — probe SELECTIVITY controls that protect the
+#     "the product is represented" reading against the obvious reviewer rebuttal
+#     ("ridge just approximates B*C from a linearly-present B and C").
+#
+# All RNG is seeded (np.random.default_rng); numpy/json/stdlib only (cell 76's
+# contract) — NO torch, NO model here. The torch steering hook in 82l MIRRORS
+# wo_inject_to_target exactly (documented there).
+# ----------------------------------------------------------------------------
+def wo_fit_ridge_probe(X, y, ridge=1.0):
+    """Fit a linear probe y~X by DUAL ridge (linear kernel) and return the PRIMAL
+    weight so a single steering DIRECTION + a value<->coordinate mapping can be
+    read off. The kernel math is BYTE-FOR-BYTE wo_cv_r2's per-fold solve (mean-
+    center on TRAIN only; lambda scaled to the kernel trace), so the steering
+    probe IS the decodability probe — no instrument drift between the two claims.
+
+    Returns a dict (or None if degenerate: ndim!=2, n<3, len(y)!=n, zero-variance
+    y, or a zero weight):
+        w          — primal weight vector (d,)  [predict(x) = w·(x-mu) + ybar]
+        mu, ybar   — train feature mean (d,) and train target mean (scalar)
+        w_norm     — ||w||   (the probe's value-per-unit-coordinate SLOPE along w-hat)
+        direction  — w / ||w||  (the UNIT steering direction w-hat)
+        wmu        — w·mu  (cached so the value<->coord maps are O(1))
+    The maps (pure functions below) satisfy, for x' obtained by steering x so that
+    direction·x' = wo_probe_coord_for_value(fit, v):   predict(x') == v  (exactly,
+    because w ∥ direction so steering only moves the value-bearing coordinate)."""
+    X = np.asarray(X, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if X.ndim != 2:
+        return None
+    n, d = X.shape
+    if n < 3 or len(y) != n or np.std(y) == 0:
+        return None
+    mu = X.mean(0)
+    Xc = X - mu                                              # mean-center on TRAIN only
+    ybar = float(y.mean())
+    K = Xc @ Xc.T                                            # [n, n] linear kernel
+    lam = ridge * (np.trace(K) / K.shape[0] + 1e-8)         # scale-invariant lambda (== wo_cv_r2)
+    alpha = np.linalg.solve(K + lam * np.eye(K.shape[0]), y - ybar)
+    w = Xc.T @ alpha                                        # primal weight (d,)
+    w_norm = float(np.linalg.norm(w))
+    if not np.isfinite(w_norm) or w_norm == 0.0:
+        return None
+    return {"w": w, "mu": mu, "ybar": ybar, "w_norm": w_norm,
+            "direction": w / w_norm, "wmu": float(w @ mu)}
+
+
+def wo_probe_predict(fit, X):
+    """Probe value-readout predict(x) = w·(x - mu) + ybar for a row or a [m,d]
+    batch (the same linear map wo_cv_r2 scores). Returns a float or a (m,) array."""
+    X = np.asarray(X, dtype=float)
+    out = (X - fit["mu"]) @ fit["w"] + fit["ybar"]
+    return float(out) if np.ndim(out) == 0 else out
+
+
+def wo_probe_coord_for_value(fit, value):
+    """The coordinate s along the unit direction w-hat such that a residual with
+    direction·x = s is read by the probe as `value`:  s = (value - ybar + w·mu)/||w||.
+    (Inverse of predict restricted to the value-bearing axis.) Used to convert a
+    target VALUE — e.g. the correct product B·C — into the coordinate the steer
+    writes in."""
+    return float((float(value) - fit["ybar"] + fit["wmu"]) / fit["w_norm"])
+
+
+def wo_probe_mean_coord(fit):
+    """The coordinate of the TRAIN mean along w-hat (= direction·mu = w·mu/||w||).
+    Steering a residual to THIS coordinate is the LEACE-flavoured ERASE: it removes
+    the predictive variance along the probe axis while preserving the mean (the
+    probe then reads ybar for every item)."""
+    return float(fit["wmu"] / fit["w_norm"])
+
+
+def wo_inject_to_target(resid, direction, target_coord):
+    """Activation-steer: write `target_coord` into the residual's coordinate along
+    the UNIT probe `direction` —
+        resid' = resid + (target_coord - direction·resid) * direction
+    so that direction·resid' == target_coord while every orthogonal component is
+    untouched (a rank-1 oblique write along one axis). Pure numpy; the last axis is
+    the feature axis, so `resid` may be a (d,) vector or a [...,d] batch. `direction`
+    must be unit-norm (the caller passes fit['direction']). Returns a NEW array.
+
+    This is the single primitive behind ALL of 82l's interventions:
+      • INJECT  : target_coord = wo_probe_coord_for_value(fit, correct_value)
+      • ERASE   : target_coord = wo_probe_mean_coord(fit)
+      • SHUFFLED: target_coord = wo_probe_coord_for_value(fit, permuted_value)
+      • RANDOM  : same call with a norm-matched RANDOM unit `direction`
+    The torch hook in 82l reproduces this formula on the device tensor at one
+    (layer, position); because 82l steers the CLEAN run, direction·resid there
+    equals direction·(cached clean residual), so the whole delta is precomputable
+    on CPU from the cached residual and the hook is a pure additive patch."""
+    resid = np.asarray(resid, dtype=float)
+    direction = np.asarray(direction, dtype=float)
+    coord = np.tensordot(resid, direction, axes=([-1], [-1]))   # direction·resid (last axis)
+    delta = (float(target_coord) - coord)
+    if np.ndim(delta) > 0:
+        delta = delta[..., None]                                # broadcast over feature axis
+    return resid + delta * direction
+
+
+def wo_gt_logit(logits_row, gt_tok_id):
+    """The logit of the ground-truth first-answer-token id from a final-position
+    logit vector (a numpy row or any indexable). Pure: just logits_row[gt_tok_id]
+    as a float — isolated so the metric is unit-testable without a model."""
+    return float(np.asarray(logits_row, dtype=float)[int(gt_tok_id)])
+
+
+def wo_logit_diff_gt(logit_gt_intervened, logit_gt_baseline):
+    """The headline metric Δ: GT first-answer-token logit (intervened) minus the
+    clean-C1 baseline GT logit. Both are scalars (the GPU cell indexes the row on
+    device; tests pass scalars / wo_gt_logit outputs). EVERY test item contributes
+    a Δ regardless of its argmax — this is the contrast-free property that makes the
+    test work on the FAILING regime where flip-rate would be ~0/n."""
+    return float(logit_gt_intervened) - float(logit_gt_baseline)
+
+
+def wo_argmax_is(logits_row, tok_id):
+    """True iff argmax of the final-position logits == tok_id (one flip-to-GT
+    event). flip-rate-to-GT-product = mean of this over the test items."""
+    return bool(int(np.asarray(logits_row, dtype=float).argmax()) == int(tok_id))
+
+
+# Documented WO#5 steering thresholds (tunable, passed through from the GPU cell).
+WO_STEER_RECOVER_THR = 0.5    # mean GT-logit Δ (nats) that counts as a real lift.
+WO_STEER_CTRL_MARGIN = 0.0    # inject must EXCEED random & shuffled by at least this.
+WO_STEER_NULL_TOL = 0.25      # |Δ| <= this (with a CI bracketing 0) reads as a null.
+
+
+def wo_steering_verdict(delta_inject, ci_inject, delta_random, delta_shuffled,
+                        delta_c4_ref, recover_thr=WO_STEER_RECOVER_THR,
+                        ctrl_margin=WO_STEER_CTRL_MARGIN, null_tol=WO_STEER_NULL_TOL,
+                        ci_halfwidth_tol=None):
+    """Decision logic for Experiment A (§A verdict). Pure; consumes only summary
+    scalars so it is fully unit-testable. Arguments:
+        delta_inject   — mean GT-logit Δ for PRODUCT injection at the '=' site (headline).
+        ci_inject      — (lo, hi) paired-bootstrap CI for delta_inject.
+        delta_random   — mean Δ for the norm-matched RANDOM-direction control.
+        delta_shuffled — mean Δ for the SHUFFLED-target (wrong product) control.
+        delta_c4_ref   — mean Δ for injecting a COUNTERFACTUAL permuted product P' at
+                         C4's '=' and scoring P''s OWN first-token logit (ceiling-free
+                         positive reference: injecting the TRUE product at C4 has no
+                         headroom, so the reference steers a wrong product and shows ITS
+                         logit rises — the metric+hook MUST move a routed-product logit here).
+    Verdict (matches the work order):
+        INCONCLUSIVE  — iff the C4 positive reference itself fails (delta_c4_ref <
+                        recover_thr or missing): the instrument can't be shown to move
+                        the GT logit, so neither RECOVERS nor CLEAN_NULL is supportable.
+        RECOVERS      — 'present and causally sufficient when routed, unused by default':
+                        delta_inject >= recover_thr AND its CI excludes 0 (lo > 0) AND it
+                        beats BOTH controls by > ctrl_margin (direction- & value-specific).
+        CLEAN_NULL    — 'operand/product genuinely ignored downstream, not merely mis-
+                        decoded': |delta_inject| <= null_tol AND the whole CI is CONTAINED
+                        in the null band [-null_tol, +null_tol] (tightly: half-width <=
+                        ci_halfwidth_tol) — AND C4 confirms the metric works. (We require
+                        CONTAINMENT, not bracketing-0: a tiny systematic probe bias can put
+                        a practically-null CI just off 0, and a bounded-small effect with a
+                        tight CI beside a large, working C4 reference IS a clean null.)
+        INCONCLUSIVE  — anything else (a positive-but-not-significant / fails-controls
+                        middle), reported with a reason (the thresholds are chosen so this
+                        is unlikely when C4 works, but it is handled, never silently coerced).
+    Returns a rich dict (label + every sub-flag + a human reason)."""
+    if ci_halfwidth_tol is None:
+        ci_halfwidth_tol = null_tol
+    lo, hi = (ci_inject if ci_inject is not None else (None, None))
+    have_ci = lo is not None and hi is not None
+    c4_ok = (delta_c4_ref is not None and delta_c4_ref >= recover_thr)
+
+    out = {"c4_ref_ok": bool(c4_ok), "delta_inject": delta_inject, "ci_inject": ci_inject,
+           "delta_random": delta_random, "delta_shuffled": delta_shuffled,
+           "delta_c4_ref": delta_c4_ref, "recover_thr": recover_thr,
+           "beats_random": None, "beats_shuffled": None, "ci_excludes_zero": None,
+           "ci_brackets_zero": None}
+
+    if not c4_ok:
+        out["label"] = "INCONCLUSIVE"
+        out["reason"] = ("C4 positive reference FAILED (product-injection at C4's '=' did not "
+                         f"raise the GT logit: Δ_C4={_wo_fmt(delta_c4_ref)} < {recover_thr}); the "
+                         "steering instrument cannot be shown to move the GT logit, so the C1 "
+                         "result is uninterpretable — fix the instrument first.")
+        return out
+
+    beats_rand = (delta_inject is not None and delta_random is not None
+                  and delta_inject > delta_random + ctrl_margin)
+    beats_shuf = (delta_inject is not None and delta_shuffled is not None
+                  and delta_inject > delta_shuffled + ctrl_margin)
+    ci_excl_zero = bool(have_ci and lo > 0.0)
+    ci_brackets_zero = bool(have_ci and lo <= 0.0 <= hi)
+    ci_in_null_band = bool(have_ci and lo >= -null_tol and hi <= null_tol)
+    ci_halfwidth = (float(hi - lo) / 2.0) if have_ci else None
+    out.update({"beats_random": bool(beats_rand), "beats_shuffled": bool(beats_shuf),
+                "ci_excludes_zero": ci_excl_zero, "ci_brackets_zero": ci_brackets_zero,
+                "ci_in_null_band": ci_in_null_band, "ci_halfwidth": ci_halfwidth})
+
+    recovers = (delta_inject is not None and delta_inject >= recover_thr
+                and ci_excl_zero and beats_rand and beats_shuf)
+    clean_null = (delta_inject is not None and abs(delta_inject) <= null_tol
+                  and ci_in_null_band and ci_halfwidth is not None
+                  and ci_halfwidth <= ci_halfwidth_tol)
+
+    if recovers:
+        out["label"] = "RECOVERS"
+        out["reason"] = (f"Injecting the correct product at '=' raises the GT-logit by "
+                         f"{_wo_fmt(delta_inject)} (CI {_wo_fmt(lo)}..{_wo_fmt(hi)} excludes 0), "
+                         f"beating the random-direction ({_wo_fmt(delta_random)}) and shuffled-"
+                         f"target ({_wo_fmt(delta_shuffled)}) controls. The product is present and "
+                         "causally SUFFICIENT when routed to the answer site — unused by default.")
+    elif clean_null:
+        out["label"] = "CLEAN_NULL"
+        out["reason"] = (f"Injecting the product at '=' moves the GT-logit by only "
+                         f"{_wo_fmt(delta_inject)} (CI {_wo_fmt(lo)}..{_wo_fmt(hi)} within ±{null_tol}) while "
+                         f"the C4 reference confirms the same injection DOES move it ({_wo_fmt(delta_c4_ref)} "
+                         f">= {recover_thr}). The product is genuinely IGNORED downstream at this site — "
+                         "not merely mis-decoded.")
+    else:
+        out["label"] = "INCONCLUSIVE"
+        bits = []
+        if delta_inject is not None and delta_inject < recover_thr and not clean_null:
+            bits.append(f"Δ_inject={_wo_fmt(delta_inject)} is between the null tol ({null_tol}) "
+                        f"and the recover thr ({recover_thr})")
+        if not ci_excl_zero and not ci_in_null_band:
+            bits.append("CI is neither clear of 0 (a recovery) nor contained in the null band")
+        if not beats_rand:
+            bits.append("does not beat the random-direction control")
+        if not beats_shuf:
+            bits.append("does not beat the shuffled-target control")
+        out["reason"] = ("C4 reference works, but the C1 result is ambiguous: "
+                         + ("; ".join(bits) if bits else "fails the RECOVERS / CLEAN_NULL criteria")
+                         + ".")
+    return out
+
+
+def _wo_fmt(x, nd=3):
+    """Compact float formatter for verdict/reason strings ('n/a' on None)."""
+    if x is None:
+        return "n/a"
+    try:
+        return f"{float(x):.{nd}f}"
+    except (TypeError, ValueError):
+        return str(x)
+
+
+def wo_control_task_labels(keys, seed=0):
+    """Hewitt–Liang CONTROL TASK target: a FIXED random real label per UNIQUE key
+    (e.g. each unique (B,C) pair), assigned in sorted-key order so it is independent
+    of input order and fully deterministic. Same key -> same label (a memorization
+    target with NO linguistic/arithmetic structure). A probe's CV-R^2 on this
+    measures the probe's CAPACITY to fit arbitrary labels at this n,d; the
+    SELECTIVITY = R^2(real target) - R^2(control task) isolates structure the
+    residual actually carries from raw fitting power. Returns a float array aligned
+    to `keys` (keys may be tuples, lists, or scalars)."""
+    def _norm(k):
+        return tuple(k) if isinstance(k, (tuple, list, np.ndarray)) else k
+    rng = np.random.default_rng(int(seed))
+    uniq = {}
+    for k in sorted({_norm(k) for k in keys}):
+        uniq[k] = float(rng.standard_normal())
+    return np.array([uniq[_norm(k)] for k in keys], dtype=float)
+
+
+def wo_linear_bc_baseline(Bvals, Cvals, n_noise=64, signal_scale=2.0,
+                          noise_scale=1.0, seed=0):
+    """The DECISIVE selectivity control's synthetic feature matrix: columns that
+    carry ONLY B and C LINEARLY (prominently encoded, like a written-in residual
+    feature) plus Gaussian noise dims — and NOTHING bilinear. Feeding this to
+    wo_cv_r2 with the B*C target answers 'can a linear probe FORM the product from
+    raw operands alone?'. A probe can read B and C from it but cannot construct the
+    interaction B*C beyond the linear (main-effect) approximation, so its product-
+    R^2 is the NEGATIVE baseline / linear ceiling. If the real residual's product-
+    R^2 EXCEEDS this baseline, the residual genuinely contains product structure;
+    if it does NOT, the residual's high product-R^2 is explained by the linear
+    presence of B and C — the honest reading the control exists to expose.
+
+    NOTE (band caveat, surfaced by 82m): over a narrow POSITIVE operand band the
+    main-effect approximation to B*C is already strong (the interaction term is a
+    small share of Var(B*C)), so this baseline need NOT collapse to ~0; the load-
+    bearing quantity is the CONTRAST real - baseline, not the baseline alone.
+    Deterministic given `seed`. Returns X with shape [n, n_noise + 4]."""
+    B = np.asarray(Bvals, dtype=float)
+    C = np.asarray(Cvals, dtype=float)
+    n = B.shape[0]
+    rng = np.random.default_rng(int(seed))
+    X = noise_scale * rng.standard_normal((n, int(n_noise) + 4))
+    Bc = B - B.mean()
+    Cc = C - C.mean()
+    X[:, 0] = signal_scale * Bc + 0.5 * rng.standard_normal(n)   # B prominently, two dims
+    X[:, 1] = signal_scale * Bc + 0.5 * rng.standard_normal(n)
+    X[:, 2] = signal_scale * Cc + 0.5 * rng.standard_normal(n)   # C prominently, two dims
+    X[:, 3] = signal_scale * Cc + 0.5 * rng.standard_normal(n)
+    return X
+
+
+def wo_probe_selectivity(X, Bvals, Cvals, target="B_times_C", folds=5, ridge=1.0,
+                         seed=0, n_noise=128):
+    """Compute ONE Experiment-B selectivity row from a cached residual matrix X
+    (n×d) and the operands, with the FIXED folds=5/ridge=1.0 instrument (wo_cv_r2)
+    for ALL four probes so they are directly comparable. target in {'B','C',
+    'B_times_C'} picks y. Returns a dict:
+        target, n,
+        R2_real             — wo_cv_r2(X, y)                       (the headline)
+        R2_control_task     — wo_cv_r2(X, Hewitt–Liang labels)     (capacity baseline)
+        R2_shuffled         — wo_cv_r2(X, permuted y)              (must collapse ~0)
+        R2_linearBC_baseline— wo_cv_r2(linear-(B,C) synth, y)      (the decisive control)
+        selectivity         — R2_real - R2_control_task
+        baseline_gap        — R2_real - R2_linearBC_baseline
+    Pure (numpy) — the GPU cell hands it the cached residuals so Experiment B is
+    CPU-only. (For target 'B'/'C' the linearBC baseline is EXPECTED to match — the
+    operand IS linearly present — so baseline_gap≈0 there is correct, not a bug; the
+    decisive contrast is for target 'B_times_C'.)"""
+    B = np.asarray(Bvals, dtype=float)
+    C = np.asarray(Cvals, dtype=float)
+    ymap = {"B": B, "C": C, "B_times_C": B * C}
+    if target not in ymap:
+        raise ValueError(f"target must be one of {sorted(ymap)}, got {target!r}")
+    y = ymap[target]
+    keys = list(zip([int(b) for b in B], [int(c) for c in C]))
+    r2_real = wo_cv_r2(X, y, folds=folds, ridge=ridge)
+    r2_ctrl = wo_cv_r2(X, wo_control_task_labels(keys, seed=seed), folds=folds, ridge=ridge)
+    r2_shuf = wo_cv_r2(X, wo_shuffle_control(y, seed=seed + 1), folds=folds, ridge=ridge)
+    r2_base = wo_cv_r2(wo_linear_bc_baseline(B, C, n_noise=n_noise, seed=seed + 2),
+                       y, folds=folds, ridge=ridge)
+    sel = None if (r2_real is None or r2_ctrl is None) else float(r2_real - r2_ctrl)
+    gap = None if (r2_real is None or r2_base is None) else float(r2_real - r2_base)
+    return {"target": target, "n": int(len(y)), "R2_real": r2_real,
+            "R2_control_task": r2_ctrl, "R2_shuffled": r2_shuf,
+            "R2_linearBC_baseline": r2_base, "selectivity": sel, "baseline_gap": gap}
+
+
+def wo_selectivity_verdict(r2_real, r2_control_task, r2_shuffled, r2_linearBC,
+                           sel_margin=0.30, shuffle_floor=0.30, baseline_margin=0.10):
+    """Decision logic for Experiment B. Pure. Classifies whether a high product-R^2
+    at the '=' site is genuine PRODUCT structure or an artifact:
+        REPRESENTED  — real beats the control task by >= sel_margin (selective),
+                       the shuffled-target collapses (< shuffle_floor), AND real
+                       EXCEEDS the linear-(B,C) baseline by >= baseline_margin
+                       (structure beyond the linear main-effect ceiling).
+        OPERANDS_ONLY— selective + shuffle collapses, but real does NOT exceed the
+                       linear-(B,C) baseline: the product-R^2 is explained by the
+                       linear presence of B and C (the reviewer's rebuttal HOLDS at
+                       this band) — report honestly, the product claim is unsupported.
+        NOT_SELECTIVE— real does not beat the control task / shuffle doesn't collapse:
+                       the probe is reading capacity/artifact, not structure.
+        INCONCLUSIVE — a required R^2 is missing.
+    Returns a rich dict (label + sub-flags + selectivity + baseline_gap + reason)."""
+    vals = {"r2_real": r2_real, "r2_control_task": r2_control_task,
+            "r2_shuffled": r2_shuffled, "r2_linearBC": r2_linearBC}
+    missing = [k for k, v in vals.items() if v is None]
+    out = dict(vals)
+    out["selectivity"] = (None if r2_real is None or r2_control_task is None
+                          else float(r2_real - r2_control_task))
+    out["baseline_gap"] = (None if r2_real is None or r2_linearBC is None
+                           else float(r2_real - r2_linearBC))
+    if missing:
+        out["label"] = "INCONCLUSIVE"
+        out["reason"] = f"missing R^2 for {missing}; cannot judge selectivity."
+        return out
+    selective = out["selectivity"] >= sel_margin
+    shuffle_collapses = r2_shuffled < shuffle_floor
+    exceeds_baseline = out["baseline_gap"] >= baseline_margin
+    out.update({"selective": bool(selective), "shuffle_collapses": bool(shuffle_collapses),
+                "exceeds_linearBC": bool(exceeds_baseline)})
+    if selective and shuffle_collapses and exceeds_baseline:
+        out["label"] = "REPRESENTED"
+        out["reason"] = (f"R^2_real={_wo_fmt(r2_real)} is selective over the control task "
+                         f"(Δ={_wo_fmt(out['selectivity'])}>={sel_margin}), the shuffled target "
+                         f"collapses ({_wo_fmt(r2_shuffled)}<{shuffle_floor}), AND it exceeds the "
+                         f"linear-(B,C) baseline by {_wo_fmt(out['baseline_gap'])}>={baseline_margin} "
+                         "— genuine product structure beyond the linear operand ceiling.")
+    elif selective and shuffle_collapses and not exceeds_baseline:
+        out["label"] = "OPERANDS_ONLY"
+        out["reason"] = (f"R^2_real={_wo_fmt(r2_real)} is selective and the shuffled target "
+                         f"collapses, but it does NOT exceed the linear-(B,C) baseline "
+                         f"({_wo_fmt(r2_linearBC)}; gap {_wo_fmt(out['baseline_gap'])}<{baseline_margin}): "
+                         "the product-R^2 is explained by the LINEAR presence of B and C, not a "
+                         "represented product. The reviewer's rebuttal holds at this operand band.")
+    else:
+        out["label"] = "NOT_SELECTIVE"
+        bits = []
+        if not selective:
+            bits.append(f"selectivity {_wo_fmt(out['selectivity'])} < {sel_margin} (control task "
+                        f"R^2={_wo_fmt(r2_control_task)} nearly as high)")
+        if not shuffle_collapses:
+            bits.append(f"shuffled-target R^2={_wo_fmt(r2_shuffled)} did not collapse (>= {shuffle_floor})")
+        out["reason"] = "probe reads capacity/artifact, not structure: " + "; ".join(bits) + "."
+    return out
+
+
 # ----------------------------------------------------------------------------
 # 9) Inline self-test (runs on every notebook execution; CPU only, ~instant).
 #    Mirrors tests/test_wo_logic.py so a notebook run also fails loudly if the
@@ -1324,6 +1723,59 @@ def _wo_selftest():
     assert _ed(1081 - 50, 23, 47) == "near_product"          # |Δ|/1081 ~ 0.046 <= 0.10
     assert _ed(1500, 23, 47) == "right_magnitude"            # 4 digits like 1081, not near
     assert _ed(7, 23, 47) == "unrelated"                     # 1 digit, far
+
+    # WORK ORDER #5 — steering probe + injection + metric + verdicts (§A/§B).
+    _s5_rng = np.random.default_rng(0)
+    _s5_n, _s5_d = 60, 12
+    _s5_B = _s5_rng.integers(20, 50, _s5_n).astype(float)
+    _s5_C = _s5_rng.integers(20, 50, _s5_n).astype(float)
+    _s5_X = _s5_rng.standard_normal((_s5_n, _s5_d))
+    _s5_X[:, 0] = (_s5_B - _s5_B.mean()) * 2.0 + 0.3 * _s5_rng.standard_normal(_s5_n)
+    _s5_fit = wo_fit_ridge_probe(_s5_X, _s5_B)
+    assert _s5_fit is not None and abs(np.linalg.norm(_s5_fit["direction"]) - 1.0) < 1e-9
+    # value<->coord round trip: steer a row to be READ as an arbitrary value, exactly.
+    _s5_coord = wo_probe_coord_for_value(_s5_fit, 999.0)
+    _s5_xs = wo_inject_to_target(_s5_X[0], _s5_fit["direction"], _s5_coord)
+    assert abs(wo_probe_predict(_s5_fit, _s5_xs) - 999.0) < 1e-5
+    # injection is rank-1 along the unit direction (delta ∥ direction).
+    _s5_delta = _s5_xs - _s5_X[0]
+    assert np.allclose(_s5_delta - (_s5_delta @ _s5_fit["direction"]) * _s5_fit["direction"], 0.0, atol=1e-8)
+    # erase (steer to the mean coordinate) -> probe reads the train mean ybar.
+    _s5_xe = wo_inject_to_target(_s5_X[0], _s5_fit["direction"], wo_probe_mean_coord(_s5_fit))
+    assert abs(wo_probe_predict(_s5_fit, _s5_xe) - _s5_fit["ybar"]) < 1e-5
+    # inject formula, explicit: direction=e0, resid=[5,9,2], target 7 -> [7,9,2].
+    assert np.allclose(wo_inject_to_target(np.array([5.0, 9.0, 2.0]),
+                                           np.array([1.0, 0.0, 0.0]), 7.0), [7.0, 9.0, 2.0])
+    # metric helpers (contrast-free: a number per item regardless of argmax).
+    _s5_row = np.array([0.1, 2.0, -1.0, 5.0])
+    assert abs(wo_gt_logit(_s5_row, 3) - 5.0) < 1e-9
+    assert abs(wo_logit_diff_gt(5.0, 2.0) - 3.0) < 1e-9
+    assert wo_argmax_is(_s5_row, 3) and not wo_argmax_is(_s5_row, 0)
+    # steering verdict: RECOVERS / CLEAN_NULL / INCONCLUSIVE(on failed C4 ref).
+    assert wo_steering_verdict(2.0, (0.5, 3.0), 0.1, 0.05, 3.0)["label"] == "RECOVERS"
+    assert wo_steering_verdict(0.02, (-0.1, 0.12), 0.0, 0.0, 3.0)["label"] == "CLEAN_NULL"
+    _s5_inc = wo_steering_verdict(2.0, (0.5, 3.0), 0.1, 0.05, 0.1)
+    assert _s5_inc["label"] == "INCONCLUSIVE" and not _s5_inc["c4_ref_ok"]
+    # selectivity controls.
+    _s5_keys = [(1, 2), (1, 2), (3, 4)]
+    _s5_lab = wo_control_task_labels(_s5_keys, seed=0)
+    assert _s5_lab[0] == _s5_lab[1] and _s5_lab[0] != _s5_lab[2]
+    assert np.array_equal(wo_control_task_labels(_s5_keys, 0), wo_control_task_labels(_s5_keys, 0))
+    _s5_Xbc = wo_linear_bc_baseline(_s5_B, _s5_C, n_noise=20, seed=1)
+    assert _s5_Xbc.shape == (_s5_n, 24)
+    assert (wo_cv_r2(_s5_Xbc, _s5_B) or 0.0) > 0.5          # B is LINEARLY present in the baseline
+    assert wo_selectivity_verdict(0.96, 0.20, 0.05, 0.50)["label"] == "REPRESENTED"
+    assert wo_selectivity_verdict(0.96, 0.20, 0.05, 0.95)["label"] == "OPERANDS_ONLY"
+    assert wo_selectivity_verdict(0.30, 0.28, 0.25, 0.10)["label"] == "NOT_SELECTIVE"
+    # wo_probe_selectivity row on a synthetic product-encoding residual -> selective.
+    _s5_Xp = _s5_rng.standard_normal((_s5_n, 40))
+    _s5_prod = _s5_B * _s5_C
+    for _j in range(3):
+        _s5_Xp[:, _j] = (_s5_prod - _s5_prod.mean()) / (_s5_prod.std() + 1e-9) * 2.0 \
+            + 0.4 * _s5_rng.standard_normal(_s5_n)
+    _s5_sel = wo_probe_selectivity(_s5_Xp, _s5_B, _s5_C, target="B_times_C", seed=3)
+    assert _s5_sel["R2_real"] is not None and _s5_sel["selectivity"] is not None
+    assert _s5_sel["R2_real"] > (_s5_sel["R2_control_task"] or 0.0)
     return True
 
 

@@ -500,6 +500,11 @@ def _wo_salvage(tag):
         "B_times_C": _best(_decod_curve(prods)),
         "C": _best(_decod_curve(Cv)),
         "shuffled_B": _best(_decod_curve(shuf)),
+        # WO#5 §B parity: a shuffled-PRODUCT null alongside shuffled-B. R^2 must
+        # collapse to ~0 — the same selectivity certificate Experiment B (82m) runs
+        # at the '=' site, recorded here so the salvage JSON carries both nulls.
+        "shuffled_product": _best(_decod_curve(
+            wo_shuffle_control(prods, seed=int(CFG["wo_localize_seed"]) + 4))),
     }
     best_layer = decodability_by_target["B"]["best_layer"]
     r2_best = decodability_by_target["B"]["cv_r2"]

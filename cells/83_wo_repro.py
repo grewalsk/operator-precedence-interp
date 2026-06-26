@@ -84,6 +84,12 @@ _deliverables = [
     "position_decodability_base.json", "position_decodability_instruct.json",
     "position_decodability_summary.csv", "position_decodability_heatmap.png",
     "boundary_map.csv", "format_recovery.csv", "error_detail.csv",
+    # WORK ORDER #5 — contrast-free causal steering (A) + probe selectivity (B):
+    "causal_steering_base.json", "causal_steering_instruct.json",
+    "causal_steering_summary.csv",
+    "causal_steering_layersweep_base.png", "causal_steering_layersweep_instruct.png",
+    "probe_selectivity.csv",
+    "probe_selectivity_base.json", "probe_selectivity_instruct.json",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:

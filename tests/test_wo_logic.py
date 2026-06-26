@@ -651,6 +651,214 @@ def test_classify_error_detail():
         check(f"category for {pred} is registered", ed(pred, B, C) in cats)
 
 
+# ================================================================= WORK ORDER #5 ==
+# ------------------------------------------------- §A steering probe + injection
+def test_fit_ridge_probe_and_inject():
+    import numpy as np
+    fit_p = WO["wo_fit_ridge_probe"]
+    predict = WO["wo_probe_predict"]
+    coord_for = WO["wo_probe_coord_for_value"]
+    mean_coord = WO["wo_probe_mean_coord"]
+    inject = WO["wo_inject_to_target"]
+    rng = np.random.default_rng(1)
+    n, d = 120, 64
+    B = rng.integers(20, 50, n).astype(float)
+    X = rng.standard_normal((n, d))
+    for j in range(3):                       # prominently encode B in a few dims
+        X[:, j] = (B - B.mean()) * 2.0 + 0.4 * rng.standard_normal(n)
+    fit = fit_p(X, B)
+    check("fit returns a probe dict", fit is not None)
+    check("direction is unit-norm", abs(np.linalg.norm(fit["direction"]) - 1.0) < 1e-9)
+    # the primal probe predicts B well in-sample (it IS the dual-ridge readout).
+    r = predict(fit, X)
+    ss_res = float(np.sum((B - r) ** 2)); ss_tot = float(np.sum((B - B.mean()) ** 2))
+    check("probe predicts B (in-sample R^2 > 0.6)", 1.0 - ss_res / ss_tot > 0.6)
+    # value<->coord round trip is EXACT: steer any row to read an arbitrary value.
+    for target_v in (0.0, 37.0, 999.0, -50.0):
+        xs = inject(X[5], fit["direction"], coord_for(fit, target_v))
+        check(f"steer-to-value reads back {target_v}", abs(predict(fit, xs) - target_v) < 1e-4)
+    # injection is rank-1: the delta is parallel to the unit direction.
+    xs = inject(X[5], fit["direction"], coord_for(fit, 100.0))
+    delta = xs - X[5]
+    ortho = delta - (delta @ fit["direction"]) * fit["direction"]
+    check("injection delta is rank-1 (∥ direction)", np.allclose(ortho, 0.0, atol=1e-8))
+    # erase -> the probe reads the train mean (ybar) for that row (LEACE-flavoured).
+    xe = inject(X[5], fit["direction"], mean_coord(fit))
+    check("erase -> probe reads ybar", abs(predict(fit, xe) - fit["ybar"]) < 1e-4)
+    # batch injection broadcasts over rows.
+    XB = inject(X[:4], fit["direction"], coord_for(fit, 500.0))
+    check("batch steer-to-value reads back 500 for every row",
+          np.allclose(predict(fit, XB), 500.0, atol=1e-3))
+    # explicit formula: e0 direction, resid [5,9,2], target 7 -> [7,9,2].
+    check("inject explicit formula", np.allclose(
+        inject(np.array([5.0, 9.0, 2.0]), np.array([1.0, 0.0, 0.0]), 7.0), [7.0, 9.0, 2.0]))
+    # degenerate inputs -> None (no crash).
+    check("fit None on too-few rows", fit_p(rng.standard_normal((2, d)), rng.standard_normal(2)) is None)
+    check("fit None on zero-variance y", fit_p(X, np.ones(n)) is None)
+
+
+def test_train_test_probe_no_leakage():
+    # A probe fit on a TRAIN half must generalize to a held-out TEST half when the
+    # signal is real (the steering experiment's split discipline), and NOT when the
+    # target is pure noise (no in-sample interpolation leaking onto test).
+    import numpy as np
+    fit_p = WO["wo_fit_ridge_probe"]; predict = WO["wo_probe_predict"]
+    rng = np.random.default_rng(7)
+    n, d = 160, 96
+    idx = rng.permutation(n); tr, te = idx[: n // 2], idx[n // 2:]
+    B = rng.integers(20, 50, n).astype(float)
+    X = rng.standard_normal((n, d))
+    for j in range(4):
+        X[:, j] = (B - B.mean()) * 2.0 + 0.4 * rng.standard_normal(n)
+    fit = fit_p(X[tr], B[tr])
+    pr = predict(fit, X[te])
+    ss_res = float(np.sum((B[te] - pr) ** 2)); ss_tot = float(np.sum((B[te] - B[te].mean()) ** 2))
+    check("held-out TEST R^2 high on real signal (>0.5)", 1.0 - ss_res / ss_tot > 0.5)
+    ynoise = rng.standard_normal(n)
+    fit_n = fit_p(X[tr], ynoise[tr])
+    prn = predict(fit_n, X[te])
+    ss_res_n = float(np.sum((ynoise[te] - prn) ** 2)); ss_tot_n = float(np.sum((ynoise[te] - ynoise[te].mean()) ** 2))
+    check("held-out TEST R^2 low on noise target (<0.3)", 1.0 - ss_res_n / ss_tot_n < 0.3)
+
+
+def test_logit_metric_helpers():
+    import numpy as np
+    gtl = WO["wo_gt_logit"]; ld = WO["wo_logit_diff_gt"]; am = WO["wo_argmax_is"]
+    row = np.array([0.1, 2.0, -1.0, 5.0, 0.0])
+    check("gt_logit indexes the GT token", abs(gtl(row, 3) - 5.0) < 1e-9)
+    check("logit_diff_gt is intervened - baseline", abs(ld(5.0, 2.0) - 3.0) < 1e-9)
+    check("logit_diff_gt yields a number even when GT is NOT argmax",
+          abs(ld(gtl(row, 2), gtl(row, 2)) - 0.0) < 1e-9)    # GT=token2 (not argmax) still scored
+    check("argmax_is true at the max token", am(row, 3))
+    check("argmax_is false elsewhere", not am(row, 0))
+
+
+def test_steering_verdict():
+    v = WO["wo_steering_verdict"]
+    rec = v(2.0, (0.5, 3.0), 0.1, 0.05, 3.0)
+    check("RECOVERS when inject beats controls + CI excludes 0", rec["label"] == "RECOVERS")
+    check("RECOVERS sub-flags set", rec["beats_random"] and rec["beats_shuffled"] and rec["ci_excludes_zero"])
+    nul = v(0.02, (-0.1, 0.12), 0.0, 0.0, 3.0)
+    check("CLEAN_NULL when |Δ| tiny + CI brackets 0 + C4 works", nul["label"] == "CLEAN_NULL")
+    inc_c4 = v(2.0, (0.5, 3.0), 0.1, 0.05, 0.1)
+    check("INCONCLUSIVE iff C4 reference fails", inc_c4["label"] == "INCONCLUSIVE" and not inc_c4["c4_ref_ok"])
+    # positive but not significant, C4 ok -> INCONCLUSIVE middle (not silently RECOVERS).
+    mid = v(0.4, (-0.2, 1.0), 0.1, 0.1, 3.0)
+    check("ambiguous middle (CI brackets 0, Δ<thr) -> INCONCLUSIVE", mid["label"] == "INCONCLUSIVE")
+    check("ambiguous middle still marks C4 ok", mid["c4_ref_ok"])
+    # inject large but DOESN'T beat a control -> not RECOVERS.
+    noctrl = v(2.0, (1.0, 3.0), 2.5, 0.1, 3.0)   # random control 2.5 >= inject 2.0
+    check("does not beat random control -> not RECOVERS", noctrl["label"] != "RECOVERS" and not noctrl["beats_random"])
+    # missing CI -> cannot be RECOVERS (needs CI excl 0).
+    noci = v(2.0, None, 0.1, 0.05, 3.0)
+    check("missing CI -> not RECOVERS", noci["label"] != "RECOVERS")
+
+
+# ------------------------------------------------- §B probe selectivity controls
+def test_control_task_labels():
+    import numpy as np
+    ct = WO["wo_control_task_labels"]
+    keys = [(20, 21), (20, 21), (34, 41), (34, 41), (34, 41), (49, 22)]
+    lab = ct(keys, seed=0)
+    check("same key -> same control label", lab[0] == lab[1] and lab[2] == lab[3] == lab[4])
+    check("different keys -> different labels (a.s.)", lab[0] != lab[2] and lab[2] != lab[5])
+    check("control-task labels deterministic", np.array_equal(ct(keys, 0), ct(keys, 0)))
+    check("control-task labels seed-dependent", not np.array_equal(ct(keys, 0), ct(keys, 1)))
+    # A random per-unique-pair label is NOT linearly decodable from a real residual
+    # that encodes B (selectivity > 0): control R^2 should be << a real B-target R^2.
+    cv = WO["wo_cv_r2"]
+    rng = np.random.default_rng(5)
+    n, d = 200, 256
+    B = rng.integers(20, 50, n).astype(float)
+    X = rng.standard_normal((n, d))
+    for j in range(3):
+        X[:, j] = (B - B.mean()) * 2.0 + 0.4 * rng.standard_normal(n)
+    real = cv(X, B)
+    ctrl = cv(X, ct([(int(b), int(i)) for i, b in enumerate(B)], seed=0))  # all-unique keys
+    check("control-task R^2 < real B R^2 (selectivity > 0)", real - (ctrl or 0.0) > 0.3)
+
+
+def test_linear_bc_baseline_discriminates():
+    # The DECISIVE control. When operands are CENTERED (symmetric about 0) the
+    # product is pure interaction -> a linear-(B,C) probe CANNOT form it (low R^2),
+    # while a residual that genuinely encodes the product decodes it (high R^2).
+    import numpy as np
+    cv = WO["wo_cv_r2"]; base = WO["wo_linear_bc_baseline"]
+    rng = np.random.default_rng(11)
+    n = 240
+    Bc = rng.integers(-15, 16, n).astype(float)
+    Cc = rng.integers(-15, 16, n).astype(float)
+    prod = Bc * Cc
+    Xbase = base(Bc, Cc, n_noise=128, seed=3)
+    r2_base_prod = cv(Xbase, prod)
+    r2_base_B = cv(Xbase, Bc)
+    check("linear-(B,C) baseline: B IS linearly readable (>0.6)", (r2_base_B or 0.0) > 0.6)
+    check("linear-(B,C) baseline: PRODUCT is NOT formable on centered operands (<0.3)",
+          r2_base_prod is not None and r2_base_prod < 0.3)
+    # a residual that genuinely encodes the product decodes it far better than the baseline.
+    Xreal = rng.standard_normal((n, 132))
+    for j in range(3):
+        Xreal[:, j] = (prod - prod.mean()) / prod.std() * 2.0 + 0.4 * rng.standard_normal(n)
+    r2_real_prod = cv(Xreal, prod)
+    check("genuine-product residual decodes product (>0.6)", (r2_real_prod or 0.0) > 0.6)
+    check("genuine product >> linear-(B,C) baseline (gap > 0.3)",
+          (r2_real_prod or 0.0) - (r2_base_prod or 0.0) > 0.3)
+    # BAND CAVEAT (documented, not a bug): over the POSITIVE band [20,49] main effects
+    # dominate, so the SAME baseline gives a HIGH product-R^2 -> the baseline alone is
+    # NOT decisive there; the load-bearing quantity is the real-vs-baseline contrast.
+    Bp = rng.integers(20, 50, n).astype(float)
+    Cp = rng.integers(20, 50, n).astype(float)
+    r2_band = cv(base(Bp, Cp, n_noise=128, seed=4), Bp * Cp)
+    check("BAND CAVEAT: positive-band baseline product-R^2 is high (main effects dominate)",
+          (r2_band or 0.0) > 0.5)
+
+
+def test_selectivity_verdict():
+    v = WO["wo_selectivity_verdict"]
+    rep = v(0.96, 0.20, 0.05, 0.50)
+    check("REPRESENTED when selective + shuffle collapses + exceeds baseline", rep["label"] == "REPRESENTED")
+    check("REPRESENTED reports selectivity + baseline_gap", abs(rep["selectivity"] - 0.76) < 1e-9
+          and abs(rep["baseline_gap"] - 0.46) < 1e-9)
+    oo = v(0.96, 0.20, 0.05, 0.95)
+    check("OPERANDS_ONLY when real does NOT exceed the linear-(B,C) baseline", oo["label"] == "OPERANDS_ONLY")
+    ns = v(0.30, 0.28, 0.25, 0.10)
+    check("NOT_SELECTIVE when control task ~ real", ns["label"] == "NOT_SELECTIVE")
+    ns2 = v(0.96, 0.20, 0.70, 0.50)
+    check("NOT_SELECTIVE when shuffle does not collapse", ns2["label"] == "NOT_SELECTIVE")
+    inc = v(0.96, None, 0.05, 0.50)
+    check("INCONCLUSIVE when a required R^2 is missing", inc["label"] == "INCONCLUSIVE")
+
+
+def test_probe_selectivity():
+    import numpy as np
+    ps = WO["wo_probe_selectivity"]
+    rng = np.random.default_rng(21)
+    n, d = 220, 200
+    B = rng.integers(20, 50, n).astype(float)
+    C = rng.integers(20, 50, n).astype(float)
+    prod = B * C
+    # residual that genuinely encodes the PRODUCT (a few prominent dims) + noise.
+    X = rng.standard_normal((n, d))
+    for j in range(3):
+        X[:, j] = (prod - prod.mean()) / prod.std() * 2.0 + 0.4 * rng.standard_normal(n)
+    row = ps(X, B, C, target="B_times_C", seed=0)
+    check("selectivity row has all four R^2 fields",
+          all(row[k] is not None for k in ("R2_real", "R2_control_task", "R2_shuffled", "R2_linearBC_baseline")))
+    check("real product R^2 high (>0.6)", row["R2_real"] > 0.6)
+    check("control-task R^2 low (selective)", row["selectivity"] > 0.3)
+    check("shuffled-product R^2 collapses (<0.3)", row["R2_shuffled"] < 0.3)
+    check("selectivity == real - control_task", abs(row["selectivity"] - (row["R2_real"] - row["R2_control_task"])) < 1e-9)
+    check("baseline_gap == real - linearBC", abs(row["baseline_gap"] - (row["R2_real"] - row["R2_linearBC_baseline"])) < 1e-9)
+    # determinism + bad target guard.
+    check("selectivity row deterministic", ps(X, B, C, "B_times_C", seed=0) == row)
+    raised = False
+    try:
+        ps(X, B, C, target="nope")
+    except ValueError:
+        raised = True
+    check("bad target raises ValueError", raised)
+
+
 def main():
     for fn in sorted(g for g in globals() if g.startswith("test_")):
         print(f"\n{fn}:")
