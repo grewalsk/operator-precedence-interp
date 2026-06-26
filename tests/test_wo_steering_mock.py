@@ -142,7 +142,7 @@ class MockModel:
         if rp is not None:
             R[rp] += 2.0 * zB * self.dB + 1.5 * zP * self.dDecode
         if surface == "C4":
-            R[final] += 2.0 * zP * self.dP                 # product on the READ direction (C4 succeeds)
+            R[final] += 1.0 * zP * self.dP                 # product on the READ direction (bump peaks at true token)
         else:  # C1: product decodable on dDecode, but the readout (dP) does NOT carry it
             R[final] += 1.5 * zP * self.dDecode            # decodable-but-unused on dDecode
         return torch.tensor(R, dtype=torch.float32), final
@@ -265,10 +265,21 @@ def _run(pairs):
         # Experiment B on the cached residuals (pure CPU).
         _exec_cell(ns, "82m_wo_selectivity.py")
         selrows = ns["WO_SELECTIVITY"]["base"]["rows"]
+        # WO#5.1 calibration (82n) — reuses the WO#5 capture pickle; needs the cell-82
+        # overwrite-patch hook (82n asserts it) which the mock provides as a stub.
+        def _mk_patch(vec_dev, pos):
+            def hook(resid_post, hook):
+                resid_post[:, pos, :] = vec_dev.to(resid_post.dtype)
+                return resid_post
+            return hook
+        ns["_wo_mk_patch_hook"] = _mk_patch
+        _exec_cell(ns, "82n_wo_steering_calibration.py")
+        cal = ns["WO_STEER_CAL"]["base"]
         # capture artifact really exists on disk (the CPU path Exp B depends on).
         cap = os.path.exists(os.path.join(art, "wo_steer_resid_base.pkl"))
         csv = os.path.exists(os.path.join(art, "results", "causal_steering_summary.csv"))
-        return out, out2, selrows, cap, csv
+        calcsv = os.path.exists(os.path.join(art, "results", "causal_steering_calibration_summary.csv"))
+        return out, out2, selrows, cap, csv, cal, calcsv
     finally:
         shutil.rmtree(art, ignore_errors=True)
 
@@ -283,7 +294,7 @@ def main():
             seen.add((B, C)); pairs.append((B, C))
 
     print("\n[mock end-to-end]  expect CLEAN_NULL on C1, with the C4 reference DETECTING signal")
-    out, out2, selrows, cap, csv = _run(pairs)
+    out, out2, selrows, cap, csv, cal, calcsv = _run(pairs)
     v = out["verdict"]
     check("capture pickle written to disk (Exp B CPU path)", cap)
     check("steering summary CSV written", csv)
@@ -315,6 +326,19 @@ def main():
     check("ExpB: selective over the Hewitt–Liang control task (> 0.3)", head["selectivity"] > 0.3)
     check("ExpB: C4 '=' product also decodable (positive anchor)",
           any(r["site"] == "C4_equals" and r["R2_real"] is not None and r["R2_real"] > 0.6 for r in selrows))
+
+    print("\n[WO#5.1 calibration]  82n runs end-to-end on the reused capture + climbs the causal ladder")
+    cv = cal["verdict"]
+    check("82n: calibration summary CSV written", calcsv)
+    check("82n: reused the WO#5 capture (no re-capture)", cal["reused_capture"] is True)
+    check("82n: zero-ablation moves the GT logit (hook works, not INSTRUMENT_BROKEN)",
+          cal["zeroabl"]["delta"] < 0 and cv["label"] != "INSTRUMENT_BROKEN")
+    check("82n: full donor swap raises the donor logit (site is causal)", cal["swap"]["delta"] > 0)
+    check("82n: verdict is CALIBRATED (mock readout reads the probe direction)", cv["label"] == "CALIBRATED")
+    check("82n: a k_star was recorded", cv["k_star"] is not None)
+    check("82n: C1 re-eval ran at k_star", cal["c1_reeval"] is not None)
+    check("82n: mock C1 product axis is inert -> C1 not drivable (drives_c1 False)",
+          cal["c1_reeval"]["drives_c1"] is False)
 
     print("\n" + ("ALL PASS" if not _fails else f"FAILURES: {_fails}"))
     return 0 if not _fails else 1

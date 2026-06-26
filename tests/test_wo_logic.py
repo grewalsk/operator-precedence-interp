@@ -859,6 +859,24 @@ def test_probe_selectivity():
     check("bad target raises ValueError", raised)
 
 
+def test_steer_calibration_verdict():
+    v = WO["wo_steer_calibration_verdict"]
+    cal = v(-5.0, 2.0, [1, 2, 4, 8], [0.1, 0.3, 0.8, 1.2])
+    check("CALIBRATED when swap works + a k crosses thr", cal["label"] == "CALIBRATED")
+    check("k_star is the SMALLEST crossing k", cal["k_star"] == 4)
+    dead = v(-5.0, 2.0, [1, 2, 4], [0.1, 0.2, 0.3])
+    check("DEAD_DIRECTION when swap works but no k crosses", dead["label"] == "DEAD_DIRECTION" and dead["k_star"] is None)
+    suspect = v(-5.0, 0.1, [1, 2], [0.1, 0.2])
+    check("METRIC_OR_SITE_SUSPECT when zero-abl works but swap doesn't", suspect["label"] == "METRIC_OR_SITE_SUSPECT")
+    broken = v(-0.2, 2.0, [1, 2], [0.8, 0.9], zeroabl_floor=1.0)
+    check("INSTRUMENT_BROKEN when zeroing barely moves the logit", broken["label"] == "INSTRUMENT_BROKEN")
+    # zero-ablation drop is scored by MAGNITUDE (it is strongly negative in practice).
+    check("zero-abl magnitude gate uses |Δ|", v(-3.0, 2.0, [1], [0.9])["label"] != "INSTRUMENT_BROKEN")
+    # thresholds are overridable.
+    check("recover_thr override flips CALIBRATED->DEAD",
+          v(-5.0, 2.0, [1, 2], [0.6, 0.7], recover_thr=0.9)["label"] == "DEAD_DIRECTION")
+
+
 def main():
     for fn in sorted(g for g in globals() if g.startswith("test_")):
         print(f"\n{fn}:")

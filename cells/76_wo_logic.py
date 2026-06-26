@@ -1587,6 +1587,82 @@ def wo_selectivity_verdict(r2_real, r2_control_task, r2_shuffled, r2_linearBC,
     return out
 
 
+# WORK ORDER #5.1 — steering-instrument calibration thresholds (tunable).
+WO_STEER_ZEROABL_FLOOR = 1.0   # zeroing the answer residual must move |Δ GT-logit| >= this.
+
+
+def wo_steer_calibration_verdict(zero_abl_delta, swap_delta, k_grid, k_deltas,
+                                 recover_thr=WO_STEER_RECOVER_THR,
+                                 zeroabl_floor=WO_STEER_ZEROABL_FLOOR):
+    """Decision logic for WO#5.1 (pure; tested). Adjudicates whether WO#5's
+    INCONCLUSIVE steering result is a DEAD INSTRUMENT or a genuine null, by climbing
+    a ladder of ever-more-causal interventions at the C4 '=' site (where the product
+    IS used). Arguments:
+      zero_abl_delta — mean Δ GT-logit when the WHOLE C4 '=' residual is ZEROED (a
+                       maximal edit; must move the logit hard, else the hook/site/
+                       token convention is broken).
+      swap_delta     — mean Δ at the DONOR product's token when the whole C4 '='
+                       residual is SWAPPED for a real donor residual emitting P' (a
+                       guaranteed-causal activation patch; must raise the donor logit).
+      k_grid,k_deltas— parallel: injection magnitude multipliers k and the mean Δ (at
+                       P') for the SCALED probe-direction counterfactual (k·δ_min).
+    Verdict ladder:
+      INSTRUMENT_BROKEN      — |zero_abl_delta| < zeroabl_floor: even zeroing the
+                               answer residual barely moves the GT logit → the hook/
+                               site/metric is broken; fix that before any causal claim.
+      METRIC_OR_SITE_SUSPECT — zero-ablation works but the full donor SWAP does not
+                               raise the donor logit (swap_delta < recover_thr): the
+                               site is reachable but the donor/metric design is off.
+      CALIBRATED@k_star      — the scaled probe-direction inject crosses recover_thr
+                               at the smallest k_star: WO#5 was UNDER-POWERED; the
+                               probe direction IS causal at magnitude k_star → re-run
+                               the C1 test there.
+      DEAD_DIRECTION         — swap works (the site IS causal) but NO tested k makes
+                               the probe-direction inject cross threshold: the operand-
+                               reconstructible probe direction is genuinely not a causal
+                               handle (decoding != causal direction) → WO#5's C1 null
+                               reflects the WRONG steering axis, not 'product unused'.
+    Returns {label, k_star, reason, + the inputs}."""
+    out = {"zero_abl_delta": zero_abl_delta, "swap_delta": swap_delta,
+           "k_grid": list(k_grid), "k_deltas": list(k_deltas),
+           "recover_thr": recover_thr, "zeroabl_floor": zeroabl_floor, "k_star": None}
+    if zero_abl_delta is None or abs(zero_abl_delta) < zeroabl_floor:
+        out["label"] = "INSTRUMENT_BROKEN"
+        out["reason"] = (f"Zeroing the whole C4 '=' residual moved the GT logit by only "
+                         f"{_wo_fmt(zero_abl_delta)} (|Δ| < {zeroabl_floor}); the hook/site/token "
+                         "convention does not move the output at all — fix the instrument first; "
+                         "the WO#5 null is uninterpretable.")
+        return out
+    if swap_delta is None or swap_delta < recover_thr:
+        out["label"] = "METRIC_OR_SITE_SUSPECT"
+        out["reason"] = (f"Zero-ablation works (|Δ|={_wo_fmt(zero_abl_delta)}) but a FULL donor swap "
+                         f"at C4 '=' only moved the donor logit by {_wo_fmt(swap_delta)} (< {recover_thr}): "
+                         "the site is reachable but the donor/metric design is off — investigate before "
+                         "trusting the magnitude sweep.")
+        return out
+    k_star = None
+    for k, d in zip(k_grid, k_deltas):
+        if d is not None and d >= recover_thr:
+            k_star = k
+            break
+    if k_star is not None:
+        out["k_star"] = k_star
+        out["label"] = "CALIBRATED"
+        out["reason"] = (f"A full donor swap moves the output (Δ={_wo_fmt(swap_delta)}), and the scaled "
+                         f"probe-direction inject crosses {recover_thr} at k={k_star}: the WO#5 run was "
+                         f"UNDER-POWERED (its k=1 edit was too small/operand-aligned). Re-evaluate the C1 "
+                         f"steering test at k={k_star}.")
+    else:
+        out["label"] = "DEAD_DIRECTION"
+        out["reason"] = (f"A full donor swap DOES move the output (Δ={_wo_fmt(swap_delta)} >= {recover_thr}), "
+                         f"so the C4 '=' site is causal and the metric works — yet NO tested magnitude "
+                         f"(k up to {max(k_grid) if k_grid else 'n/a'}) makes the probe-direction inject cross "
+                         f"{recover_thr}. The operand-reconstructible probe direction is genuinely not a causal "
+                         "handle (decoding != causal direction); WO#5's C1 null reflects the wrong steering axis, "
+                         "not the product being unused downstream.")
+    return out
+
+
 # ----------------------------------------------------------------------------
 # 9) Inline self-test (runs on every notebook execution; CPU only, ~instant).
 #    Mirrors tests/test_wo_logic.py so a notebook run also fails loudly if the
@@ -1776,6 +1852,12 @@ def _wo_selftest():
     _s5_sel = wo_probe_selectivity(_s5_Xp, _s5_B, _s5_C, target="B_times_C", seed=3)
     assert _s5_sel["R2_real"] is not None and _s5_sel["selectivity"] is not None
     assert _s5_sel["R2_real"] > (_s5_sel["R2_control_task"] or 0.0)
+    # WO#5.1 calibration verdict ladder.
+    assert wo_steer_calibration_verdict(-5.0, 2.0, [1, 2, 4, 8], [0.1, 0.3, 0.8, 1.2])["label"] == "CALIBRATED"
+    assert wo_steer_calibration_verdict(-5.0, 2.0, [1, 2, 4, 8], [0.1, 0.3, 0.8, 1.2])["k_star"] == 4
+    assert wo_steer_calibration_verdict(-5.0, 2.0, [1, 2, 4], [0.1, 0.2, 0.3])["label"] == "DEAD_DIRECTION"
+    assert wo_steer_calibration_verdict(-5.0, 0.1, [1, 2], [0.1, 0.2])["label"] == "METRIC_OR_SITE_SUSPECT"
+    assert wo_steer_calibration_verdict(-0.2, 2.0, [1, 2], [0.8, 0.9])["label"] == "INSTRUMENT_BROKEN"
     return True
 
 

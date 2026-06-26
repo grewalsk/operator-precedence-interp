@@ -101,6 +101,35 @@ R2_shuffled, R2_linearBC_baseline, selectivity, baseline_gap, verdict) +
 
 > **Selectivity (C1 `=`, product):** `<see probe_selectivity.csv / probe_selectivity_{tag}.json>`
 
+## WO#5.1 — steering-instrument calibration (follow-up, cell `82n`)
+
+The WO#5 A100 run came back **INCONCLUSIVE on both tags**: every Δ (inject, random,
+shuffled, **and the C4 positive reference**) was ~0 at every layer, so the steering
+instrument was never validated and the C1 result is uninterpretable (the verdict
+logic correctly refused a clean-null claim). Experiment B explained part of it —
+`OPERANDS_ONLY`: the product-R²=0.97 at `=` does **not** exceed the linear-(B,C)
+baseline (0.968, = the analytic ~97% main-effect ceiling for band [20,49]), so the
+probe direction is ~99% operand-reconstructible and isn't a product-specific axis.
+
+**Cell `82n` (WO#5.1) disambiguates** whether WO#5 was a *dead instrument* or a real
+null, by climbing a causal ladder at the C4 `=` site and **reusing the cached WO#5
+residuals (no re-capture)**:
+1. **Zero-ablation** — zero the whole C4 `=` residual; the GT logit must collapse, else
+   the hook/site/metric is broken (`INSTRUMENT_BROKEN`).
+2. **Full-residual swap** — replace the C4 `=` residual with a donor (product P′); does
+   the model emit P′? (a guaranteed-causal positive control).
+3. **Magnitude sweep** — scale the probe-direction counterfactual inject by k∈{1…32}
+   until P′'s logit crosses threshold; record `k*` and `‖δ‖/‖resid‖`.
+4. **C1 re-eval @k\*** — if calibrated, inject a counterfactual at C1's `=` at k* and ask
+   whether the C1 answer site is drivable.
+
+Verdict (`wo_steer_calibration_verdict`): `INSTRUMENT_BROKEN` / `METRIC_OR_SITE_SUSPECT`
+/ `CALIBRATED@k*` (WO#5 was under-powered → re-run C1 at k*) / `DEAD_DIRECTION` (the
+operand-aligned probe direction is genuinely not a causal handle — *decoding ≠ causal*).
+Deliverables: `causal_steering_calibration_{base,instruct}.json` +
+`causal_steering_calibration_summary.csv`. Compute: ~2k forward passes/tag at one layer
+each (≈15–20 min A100 total) since the expensive WO#5 capture + full sweep are reused.
+
 ## Reproduce
 
 `python3 tests/test_wo_logic.py` (ALL PASS) and `python3 tests/test_wo_steering_mock.py` (ALL PASS)

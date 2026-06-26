@@ -90,6 +90,9 @@ _deliverables = [
     "causal_steering_layersweep_base.png", "causal_steering_layersweep_instruct.png",
     "probe_selectivity.csv",
     "probe_selectivity_base.json", "probe_selectivity_instruct.json",
+    # WORK ORDER #5.1 — steering-instrument calibration (reuses the WO#5 capture):
+    "causal_steering_calibration_base.json", "causal_steering_calibration_instruct.json",
+    "causal_steering_calibration_summary.csv",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:
