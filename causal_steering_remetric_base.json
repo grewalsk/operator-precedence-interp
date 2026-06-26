@@ -1,0 +1,161 @@
+{
+  "tag": "base",
+  "experiment": "WO5.1b_steering_remetric",
+  "reused_capture": true,
+  "pair_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf",
+  "n_test": 200,
+  "regL_c4": 4,
+  "inj_layers": [
+    4,
+    16,
+    26
+  ],
+  "k_grid": [
+    1,
+    4,
+    16
+  ],
+  "zeroabl": {
+    "moves": true,
+    "dgt": -7.69140625,
+    "flip_away": 0.0
+  },
+  "swap": {
+    "flip": 1.0,
+    "layer": 4,
+    "logit_diff": 0.0,
+    "logit_diff_delta": 0.0
+  },
+  "sweep": {
+    "rows": [
+      {
+        "layer": 4,
+        "k": 1,
+        "flip_to_Pprime": 1.0,
+        "logit_diff": 0.0,
+        "logit_diff_delta": 0.0
+      },
+      {
+        "layer": 4,
+        "k": 4,
+        "flip_to_Pprime": 1.0,
+        "logit_diff": 0.0,
+        "logit_diff_delta": 0.0
+      },
+      {
+        "layer": 4,
+        "k": 16,
+        "flip_to_Pprime": 1.0,
+        "logit_diff": 0.0,
+        "logit_diff_delta": 0.0
+      },
+      {
+        "layer": 16,
+        "k": 1,
+        "flip_to_Pprime": 1.0,
+        "logit_diff": 0.0,
+        "logit_diff_delta": 0.0
+      },
+      {
+        "layer": 16,
+        "k": 4,
+        "flip_to_Pprime": 1.0,
+        "logit_diff": 0.0,
+        "logit_diff_delta": 0.0
+      },
+      {
+        "layer": 16,
+        "k": 16,
+        "flip_to_Pprime": 0.77,
+        "logit_diff": 0.0,
+        "logit_diff_delta": 0.0
+      },
+      {
+        "layer": 26,
+        "k": 1,
+        "flip_to_Pprime": 1.0,
+        "logit_diff": 0.0,
+        "logit_diff_delta": 0.0
+      },
+      {
+        "layer": 26,
+        "k": 4,
+        "flip_to_Pprime": 0.965,
+        "logit_diff": 0.0,
+        "logit_diff_delta": 0.0
+      },
+      {
+        "layer": 26,
+        "k": 16,
+        "flip_to_Pprime": 0.67,
+        "logit_diff": 0.0,
+        "logit_diff_delta": 0.0
+      }
+    ],
+    "layer_k_flips": [
+      [
+        4,
+        1,
+        1.0
+      ],
+      [
+        4,
+        4,
+        1.0
+      ],
+      [
+        4,
+        16,
+        1.0
+      ],
+      [
+        16,
+        1,
+        1.0
+      ],
+      [
+        16,
+        4,
+        1.0
+      ],
+      [
+        16,
+        16,
+        0.77
+      ],
+      [
+        26,
+        1,
+        1.0
+      ],
+      [
+        26,
+        4,
+        0.965
+      ],
+      [
+        26,
+        16,
+        0.67
+      ]
+    ]
+  },
+  "c1_reeval": {
+    "layer": 4,
+    "k": 1,
+    "flip_to_Pprime": 0.78,
+    "logit_diff_delta": 0.0,
+    "drives_c1": true
+  },
+  "verdict": {
+    "swap_flip": 1.0,
+    "flip_thr": 0.5,
+    "layer_star": 4,
+    "k_star": 1,
+    "best_inject_flip": 1.0,
+    "label": "CALIBRATED",
+    "reason": "The full swap flips the answer (rate 1.000), AND the scaled probe-direction inject flips it at rate 1.000 at layer 4, k=1: WO#5's null was a metric/magnitude artifact, not 'product unused'. Re-run the C1 steering test at (layer 4, k=1)."
+  },
+  "flip_thr": 0.5,
+  "note": "Re-scores the WO#5.1 ladder with FLIP-RATE-to-target + LOGIT-DIFF."
+}
