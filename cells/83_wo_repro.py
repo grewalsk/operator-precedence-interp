@@ -99,6 +99,9 @@ _deliverables = [
     # WORK ORDER #5.1c — full-product metric (fixes the first-token degeneracy):
     "causal_steering_fullproduct_base.json", "causal_steering_fullproduct_instruct.json",
     "causal_steering_fullproduct_summary.csv",
+    # WORK ORDER #5.1d — late-layer full-swap sweep (localize the causal answer site):
+    "causal_steering_lateswap_base.json", "causal_steering_lateswap_instruct.json",
+    "causal_steering_lateswap_summary.csv",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:
