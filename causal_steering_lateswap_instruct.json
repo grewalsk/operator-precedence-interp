@@ -1,0 +1,76 @@
+{
+  "tag": "instruct",
+  "experiment": "WO5.1d_lateswap",
+  "reused_capture": true,
+  "late_layers": [
+    19,
+    21,
+    23,
+    25,
+    27,
+    29,
+    31
+  ],
+  "rows": [
+    {
+      "layer": 19,
+      "fullprod_logprob_delta": 0.11716041587118525,
+      "emit_Pprime_rate": 0.0,
+      "emit_true_rate": 0.95,
+      "gen_n": 60,
+      "n": 200
+    },
+    {
+      "layer": 21,
+      "fullprod_logprob_delta": 0.13548269373713992,
+      "emit_Pprime_rate": 0.0,
+      "emit_true_rate": 0.9333333333333333,
+      "gen_n": 60,
+      "n": 200
+    },
+    {
+      "layer": 23,
+      "fullprod_logprob_delta": 0.14925025872304104,
+      "emit_Pprime_rate": 0.0,
+      "emit_true_rate": 0.9166666666666666,
+      "gen_n": 60,
+      "n": 200
+    },
+    {
+      "layer": 25,
+      "fullprod_logprob_delta": 0.12086580390518066,
+      "emit_Pprime_rate": 0.0,
+      "emit_true_rate": 0.9166666666666666,
+      "gen_n": 60,
+      "n": 200
+    },
+    {
+      "layer": 27,
+      "fullprod_logprob_delta": 0.1265751362289302,
+      "emit_Pprime_rate": 0.0,
+      "emit_true_rate": 0.9333333333333333,
+      "gen_n": 60,
+      "n": 200
+    },
+    {
+      "layer": 29,
+      "fullprod_logprob_delta": 0.04912614430184476,
+      "emit_Pprime_rate": 0.0,
+      "emit_true_rate": 0.9333333333333333,
+      "gen_n": 60,
+      "n": 200
+    },
+    {
+      "layer": 31,
+      "fullprod_logprob_delta": 0.0006365455687046051,
+      "emit_Pprime_rate": 0.0,
+      "emit_true_rate": 0.9166666666666666,
+      "gen_n": 60,
+      "n": 200
+    }
+  ],
+  "best_layer": 19,
+  "best_emit_Pprime": 0.0,
+  "verdict": "PRODUCT_NOT_AT_EQUALS",
+  "pair_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf"
+}
