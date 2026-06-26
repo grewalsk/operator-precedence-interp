@@ -87,6 +87,9 @@ deliverables produced (ART/results):
   [x] probe_selectivity.csv
   [x] probe_selectivity_base.json
   [x] probe_selectivity_instruct.json
+  [x] causal_steering_calibration_base.json
+  [x] causal_steering_calibration_instruct.json
+  [x] causal_steering_calibration_summary.csv
 
 # Reproduce: open the notebook, set HF_TOKEN, Run All. All forward passes are
 # cached per (model-tag, condition) under ART; a fresh runtime resumes from disk.

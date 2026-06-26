@@ -1,0 +1,79 @@
+{
+  "tag": "base",
+  "experiment": "WO5.1_steering_instrument_calibration",
+  "reused_capture": true,
+  "pair_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf",
+  "n_test": 200,
+  "regL_c4": 4,
+  "regL_c1": 6,
+  "regR2_c4": 0.9661584422808105,
+  "regR2_c1": 0.9417960070959769,
+  "zeroabl": {
+    "delta": -7.67265625,
+    "flip_away": 0.0,
+    "n": 40
+  },
+  "swap": {
+    "delta": 0.12937499999999957,
+    "ci": [
+      0.11687500000000028,
+      0.14187499999999886
+    ],
+    "flip_to_donor": 1.0,
+    "n": 200
+  },
+  "sweep": {
+    "k_grid": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32
+    ],
+    "k_deltas": [
+      0.0006249999999994316,
+      -0.0006250000000029843,
+      -0.0018750000000018474,
+      -0.0400000000000027,
+      -0.10625000000000284,
+      -0.23156250000000256
+    ],
+    "rel_norm": [
+      0.03277700644591573,
+      0.06555401289183146,
+      0.13110802578366293,
+      0.26221605156732586,
+      0.5244321031346517,
+      1.0488642062693034
+    ]
+  },
+  "c1_reeval": null,
+  "verdict": {
+    "zero_abl_delta": -7.67265625,
+    "swap_delta": 0.12937499999999957,
+    "k_grid": [
+      1,
+      2,
+      4,
+      8,
+      16,
+      32
+    ],
+    "k_deltas": [
+      0.0006249999999994316,
+      -0.0006250000000029843,
+      -0.0018750000000018474,
+      -0.0400000000000027,
+      -0.10625000000000284,
+      -0.23156250000000256
+    ],
+    "recover_thr": 0.5,
+    "zeroabl_floor": 1.0,
+    "k_star": null,
+    "label": "METRIC_OR_SITE_SUSPECT",
+    "reason": "Zero-ablation works (|\u0394|=-7.673) but a FULL donor swap at C4 '=' only moved the donor logit by 0.129 (< 0.5): the site is reachable but the donor/metric design is off \u2014 investigate before trusting the magnitude sweep."
+  },
+  "recover_thr": 0.5,
+  "note": "Diagnoses WO#5's INCONCLUSIVE: climbs zero-ablation -> full donor swap -> magnitude sweep at C4 '=' (reusing the cached residuals). CALIBRATED@k => WO#5 was under-powered; DEAD_DIRECTION => the probe (operand-aligned) direction is not a causal handle."
+}
