@@ -96,6 +96,9 @@ _deliverables = [
     # WORK ORDER #5.1b — re-metric (flip-rate + logit-diff):
     "causal_steering_remetric_base.json", "causal_steering_remetric_instruct.json",
     "causal_steering_remetric_summary.csv",
+    # WORK ORDER #5.1c — full-product metric (fixes the first-token degeneracy):
+    "causal_steering_fullproduct_base.json", "causal_steering_fullproduct_instruct.json",
+    "causal_steering_fullproduct_summary.csv",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:

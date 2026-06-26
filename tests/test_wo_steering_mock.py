@@ -126,7 +126,16 @@ class MockModel:
     def _resid_seq(self, tokens):
         ids = tokens[0].tolist()
         key = tuple(ids)
-        B, C, surface = self._prompt_by_key[key]
+        if key in self._prompt_by_key:
+            B, C, surface = self._prompt_by_key[key]
+        else:                                            # generation/teacher-forcing: prompt is a prefix
+            B, C, surface = None, None, "C4"
+            for k, v in sorted(self._prompt_by_key.items(), key=lambda kv: -len(kv[0])):
+                if len(k) <= len(ids) and tuple(ids[:len(k)]) == k:
+                    B, C, surface = v
+                    break
+            if B is None:
+                B, C = 30, 30
         seq = len(ids)
         rng = np.random.default_rng(1000 + B * 97 + C)
         R = 0.005 * rng.standard_normal((seq, self.d))   # small vs product-token z-spacing (clean argmax)
@@ -278,12 +287,16 @@ def _run(pairs):
         # WO#5.1b re-metric (82o) — flip-rate + logit-diff, reuses the same cache.
         _exec_cell(ns, "82o_wo_steering_remetric.py")
         remet = ns["WO_STEER_RO"]["base"]
+        # WO#5.1c full-product metric (82p) — teacher-forced logprob + greedy decode.
+        _exec_cell(ns, "82p_wo_steering_fullproduct.py")
+        fp = ns["WO_STEER_FP"]["base"]
         # capture artifact really exists on disk (the CPU path Exp B depends on).
         cap = os.path.exists(os.path.join(art, "wo_steer_resid_base.pkl"))
         csv = os.path.exists(os.path.join(art, "results", "causal_steering_summary.csv"))
         calcsv = os.path.exists(os.path.join(art, "results", "causal_steering_calibration_summary.csv"))
         rocsv = os.path.exists(os.path.join(art, "results", "causal_steering_remetric_summary.csv"))
-        return out, out2, selrows, cap, csv, cal, calcsv, remet, rocsv
+        fpcsv = os.path.exists(os.path.join(art, "results", "causal_steering_fullproduct_summary.csv"))
+        return out, out2, selrows, cap, csv, cal, calcsv, remet, rocsv, fp, fpcsv
     finally:
         shutil.rmtree(art, ignore_errors=True)
 
@@ -298,7 +311,7 @@ def main():
             seen.add((B, C)); pairs.append((B, C))
 
     print("\n[mock end-to-end]  expect CLEAN_NULL on C1, with the C4 reference DETECTING signal")
-    out, out2, selrows, cap, csv, cal, calcsv, remet, rocsv = _run(pairs)
+    out, out2, selrows, cap, csv, cal, calcsv, remet, rocsv, fp, fpcsv = _run(pairs)
     v = out["verdict"]
     check("capture pickle written to disk (Exp B CPU path)", cap)
     check("steering summary CSV written", csv)
@@ -353,6 +366,27 @@ def main():
     check("82o: records a winning (layer*, k*)", rv["layer_star"] is not None and rv["k_star"] is not None)
     check("82o: C1 re-eval ran at the winner", remet["c1_reeval"] is not None)
     check("82o: mock C1 axis inert -> C1 not drivable", remet["c1_reeval"]["drives_c1"] is False)
+
+    print("\n[WO#5.1c full-product]  82p re-scores with teacher-forced logprob + greedy-decode parse")
+    check("82p: full-product summary CSV written", fpcsv)
+    check("82p: reused the WO#5 capture", fp["reused_capture"] is True)
+    check("82p: ran all four interventions (swap + 2 inject + C1)", len(fp["cells"]) == 4)
+    check("82p: every cell has a full-product logprob delta + emit-rate",
+          all(("fullprod_logprob_delta" in c and "emit_Pprime_rate" in c) for c in fp["cells"].values()))
+    check("82p: produced a verdict", fp["verdict"] in
+          ("INJECT_WORKS", "DEAD_DIRECTION", "SITE_OR_METRIC_STILL_BROKEN"))
+    # mock tokenizer gives each product a DISTINCT token, so the shared-token diagnostic is ~0
+    # (the real Llama run is where it ~1.0); the full swap moves the full-product logprob.
+    check("82p: mock first-token NOT shared (distinct tokens) -> diagnostic ~0",
+          fp["first_tok_shared_frac"] < 0.5)
+    # NB the teacher-forced logprob is uniform in the mock (it only fills final-position
+    # logits) -> Δ≈0; the REAL model has true intermediate logits. The greedy-decode
+    # emit-P' metric IS represented in the mock and is the gold signal here.
+    check("82p: full swap makes the model EMIT the full P' (greedy-decode; site is causal)",
+          fp["cells"]["swap_C4"]["emit_Pprime_rate"] >= 0.5)
+    _c1cell = next(c for name, c in fp["cells"].items() if name.startswith("inject_C1"))
+    check("82p: mock C1 axis inert -> C1 emits P' far less than the full swap",
+          _c1cell["emit_Pprime_rate"] < fp["cells"]["swap_C4"]["emit_Pprime_rate"])
 
     print("\n" + ("ALL PASS" if not _fails else f"FAILURES: {_fails}"))
     return 0 if not _fails else 1
