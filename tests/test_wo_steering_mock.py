@@ -129,7 +129,7 @@ class MockModel:
         B, C, surface = self._prompt_by_key[key]
         seq = len(ids)
         rng = np.random.default_rng(1000 + B * 97 + C)
-        R = 0.05 * rng.standard_normal((seq, self.d))
+        R = 0.005 * rng.standard_normal((seq, self.d))   # small vs product-token z-spacing (clean argmax)
         zP = (B * C - self.meanBC) / self.stdBC
         zB = (B - self.meanB) / self.stdB
         final = seq - 1
@@ -275,11 +275,15 @@ def _run(pairs):
         ns["_wo_mk_patch_hook"] = _mk_patch
         _exec_cell(ns, "82n_wo_steering_calibration.py")
         cal = ns["WO_STEER_CAL"]["base"]
+        # WO#5.1b re-metric (82o) — flip-rate + logit-diff, reuses the same cache.
+        _exec_cell(ns, "82o_wo_steering_remetric.py")
+        remet = ns["WO_STEER_RO"]["base"]
         # capture artifact really exists on disk (the CPU path Exp B depends on).
         cap = os.path.exists(os.path.join(art, "wo_steer_resid_base.pkl"))
         csv = os.path.exists(os.path.join(art, "results", "causal_steering_summary.csv"))
         calcsv = os.path.exists(os.path.join(art, "results", "causal_steering_calibration_summary.csv"))
-        return out, out2, selrows, cap, csv, cal, calcsv
+        rocsv = os.path.exists(os.path.join(art, "results", "causal_steering_remetric_summary.csv"))
+        return out, out2, selrows, cap, csv, cal, calcsv, remet, rocsv
     finally:
         shutil.rmtree(art, ignore_errors=True)
 
@@ -294,7 +298,7 @@ def main():
             seen.add((B, C)); pairs.append((B, C))
 
     print("\n[mock end-to-end]  expect CLEAN_NULL on C1, with the C4 reference DETECTING signal")
-    out, out2, selrows, cap, csv, cal, calcsv = _run(pairs)
+    out, out2, selrows, cap, csv, cal, calcsv, remet, rocsv = _run(pairs)
     v = out["verdict"]
     check("capture pickle written to disk (Exp B CPU path)", cap)
     check("steering summary CSV written", csv)
@@ -339,6 +343,16 @@ def main():
     check("82n: C1 re-eval ran at k_star", cal["c1_reeval"] is not None)
     check("82n: mock C1 product axis is inert -> C1 not drivable (drives_c1 False)",
           cal["c1_reeval"]["drives_c1"] is False)
+
+    print("\n[WO#5.1b re-metric]  82o re-scores with flip-rate + logit-diff across (layer x k)")
+    rv = remet["verdict"]
+    check("82o: re-metric summary CSV written", rocsv)
+    check("82o: reused the WO#5 capture", remet["reused_capture"] is True)
+    check("82o: full swap flips the answer (flip→donor high)", remet["swap"]["flip"] >= 0.5)
+    check("82o: probe-direction inject flips at some (layer,k) -> CALIBRATED", rv["label"] == "CALIBRATED")
+    check("82o: records a winning (layer*, k*)", rv["layer_star"] is not None and rv["k_star"] is not None)
+    check("82o: C1 re-eval ran at the winner", remet["c1_reeval"] is not None)
+    check("82o: mock C1 axis inert -> C1 not drivable", remet["c1_reeval"]["drives_c1"] is False)
 
     print("\n" + ("ALL PASS" if not _fails else f"FAILURES: {_fails}"))
     return 0 if not _fails else 1

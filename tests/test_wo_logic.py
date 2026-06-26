@@ -877,6 +877,26 @@ def test_steer_calibration_verdict():
           v(-5.0, 2.0, [1, 2], [0.6, 0.7], recover_thr=0.9)["label"] == "DEAD_DIRECTION")
 
 
+def test_steer_flip_verdict():
+    fv = WO["wo_steer_flip_verdict"]
+    cal = fv(True, 1.0, [(4, 1, 0.0), (4, 4, 0.0), (30, 4, 0.8)])
+    check("CALIBRATED when an inject (layer,k) flips past thr", cal["label"] == "CALIBRATED")
+    check("winner is the smallest-k crossing cell", cal["k_star"] == 4 and cal["layer_star"] == 30)
+    # smallest-k tie-break prefers the higher flip-rate at that k.
+    cal2 = fv(True, 1.0, [(8, 2, 0.6), (30, 2, 0.9), (4, 8, 0.95)])
+    check("ties on k broken by highest flip-rate", cal2["k_star"] == 2 and cal2["layer_star"] == 30)
+    dead = fv(True, 1.0, [(4, 1, 0.0), (16, 8, 0.2), (30, 32, 0.1)])
+    check("DEAD_DIRECTION when swap flips but inject never does", dead["label"] == "DEAD_DIRECTION")
+    check("DEAD_DIRECTION reports the best (failed) inject flip", abs(dead["best_inject_flip"] - 0.2) < 1e-9)
+    suspect = fv(True, 0.1, [(4, 1, 0.9)])
+    check("METRIC_OR_SITE_SUSPECT when the full swap does not flip", suspect["label"] == "METRIC_OR_SITE_SUSPECT")
+    broken = fv(False, 1.0, [(4, 1, 0.9)])
+    check("INSTRUMENT_BROKEN when zero-ablation does nothing", broken["label"] == "INSTRUMENT_BROKEN")
+    # flip_thr is overridable.
+    check("higher flip_thr can flip CALIBRATED->DEAD",
+          fv(True, 1.0, [(30, 4, 0.6)], flip_thr=0.8)["label"] == "DEAD_DIRECTION")
+
+
 def main():
     for fn in sorted(g for g in globals() if g.startswith("test_")):
         print(f"\n{fn}:")

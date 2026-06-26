@@ -1663,6 +1663,65 @@ def wo_steer_calibration_verdict(zero_abl_delta, swap_delta, k_grid, k_deltas,
     return out
 
 
+def wo_steer_flip_verdict(zero_abl_moves, swap_flip, layer_k_flips, flip_thr=0.5):
+    """FLIP-RATE version of the WO#5.1 ladder (pure; tested), for cell 82o. The
+    WO#5.1 run showed the absolute first-token LOGIT is compressed: a full-residual
+    swap FLIPPED the answer to the donor product on 100% of items yet moved the donor
+    logit by ~0 (many leading-digit-chunk tokens share a similar logit). So re-score
+    the ladder with FLIP-RATE-to-target instead:
+      zero_abl_moves : bool — did zeroing the C4 '=' residual change the output at all
+                       (|Δlogit| past the floor OR any argmax change); the hook must fire.
+      swap_flip      : flip-rate-to-donor for the full-residual swap (guaranteed-causal
+                       positive control; must be high).
+      layer_k_flips  : list of (layer, k, inject_flip_rate) for the scaled probe-
+                       direction counterfactual across layers and magnitudes.
+    Verdict:
+      INSTRUMENT_BROKEN      — zeroing does nothing (hook dead).
+      METRIC_OR_SITE_SUSPECT — zero works but the full SWAP does not flip the answer.
+      CALIBRATED             — some (layer,k) makes the probe-direction inject flip
+                               >= flip_thr (records the SMALLEST-k winner): WO#5 was
+                               under-powered/under-metriced; re-run the C1 test there.
+      DEAD_DIRECTION         — the swap flips (the site IS causal) but NO (layer,k)
+                               makes the inject flip: the operand-aligned probe
+                               direction is not a causal handle (decoding != causal).
+    Returns {label, layer_star, k_star, swap_flip, best_inject_flip, reason}."""
+    out = {"swap_flip": swap_flip, "flip_thr": flip_thr, "layer_star": None, "k_star": None,
+           "best_inject_flip": None}
+    crossing = [(L, k, f) for (L, k, f) in layer_k_flips if f is not None and f >= flip_thr]
+    if layer_k_flips:
+        out["best_inject_flip"] = max((f for (_, _, f) in layer_k_flips if f is not None), default=None)
+    if not zero_abl_moves:
+        out["label"] = "INSTRUMENT_BROKEN"
+        out["reason"] = ("Zeroing the whole C4 '=' residual did not change the output at all — the "
+                         "hook/site/token convention is dead; fix it before any causal claim.")
+        return out
+    if swap_flip is None or swap_flip < flip_thr:
+        out["label"] = "METRIC_OR_SITE_SUSPECT"
+        out["reason"] = (f"Zero-ablation fires but the full donor SWAP only flips the answer at rate "
+                         f"{_wo_fmt(swap_flip)} (< {flip_thr}): the guaranteed-causal control does not "
+                         "control the output — investigate the donor/site before the inject sweep.")
+        return out
+    if crossing:
+        # smallest k wins; tie-break on the highest flip-rate at that k.
+        kmin = min(k for (_, k, _) in crossing)
+        best = max((c for c in crossing if c[1] == kmin), key=lambda c: c[2])
+        out["layer_star"], out["k_star"] = int(best[0]), best[1]
+        out["label"] = "CALIBRATED"
+        out["reason"] = (f"The full swap flips the answer (rate {_wo_fmt(swap_flip)}), AND the scaled "
+                         f"probe-direction inject flips it at rate {_wo_fmt(best[2])} at layer "
+                         f"{best[0]}, k={best[1]}: WO#5's null was a metric/magnitude artifact, not "
+                         f"'product unused'. Re-run the C1 steering test at (layer {best[0]}, k={best[1]}).")
+    else:
+        out["label"] = "DEAD_DIRECTION"
+        out["reason"] = (f"The full swap flips the answer (rate {_wo_fmt(swap_flip)}) so the C4 '=' site "
+                         f"IS causal, but NO tested (layer,k) makes the probe-direction inject flip "
+                         f">= {flip_thr} (best {_wo_fmt(out['best_inject_flip'])}). The operand-aligned "
+                         "probe direction is genuinely not a causal handle (decoding != causal direction); "
+                         "WO#5's C1 null is a wrong-axis artifact — use DAS/gradient-fit directions or a "
+                         "centered operand band for a real product-representation test.")
+    return out
+
+
 # ----------------------------------------------------------------------------
 # 9) Inline self-test (runs on every notebook execution; CPU only, ~instant).
 #    Mirrors tests/test_wo_logic.py so a notebook run also fails loudly if the
@@ -1858,6 +1917,12 @@ def _wo_selftest():
     assert wo_steer_calibration_verdict(-5.0, 2.0, [1, 2, 4], [0.1, 0.2, 0.3])["label"] == "DEAD_DIRECTION"
     assert wo_steer_calibration_verdict(-5.0, 0.1, [1, 2], [0.1, 0.2])["label"] == "METRIC_OR_SITE_SUSPECT"
     assert wo_steer_calibration_verdict(-0.2, 2.0, [1, 2], [0.8, 0.9])["label"] == "INSTRUMENT_BROKEN"
+    # WO#5.1 re-metric (flip-rate) verdict ladder.
+    _fv = wo_steer_flip_verdict(True, 1.0, [(4, 1, 0.0), (4, 4, 0.0), (30, 4, 0.8)])
+    assert _fv["label"] == "CALIBRATED" and _fv["layer_star"] == 30 and _fv["k_star"] == 4
+    assert wo_steer_flip_verdict(True, 1.0, [(4, 1, 0.0), (30, 32, 0.1)])["label"] == "DEAD_DIRECTION"
+    assert wo_steer_flip_verdict(True, 0.0, [(4, 1, 0.9)])["label"] == "METRIC_OR_SITE_SUSPECT"
+    assert wo_steer_flip_verdict(False, 1.0, [(4, 1, 0.9)])["label"] == "INSTRUMENT_BROKEN"
     return True
 
 

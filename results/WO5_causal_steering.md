@@ -130,6 +130,28 @@ Deliverables: `causal_steering_calibration_{base,instruct}.json` +
 `causal_steering_calibration_summary.csv`. Compute: ~2k forward passes/tag at one layer
 each (≈15–20 min A100 total) since the expensive WO#5 capture + full sweep are reused.
 
+### WO#5.1 run result + WO#5.1b re-metric (cell `82o`)
+
+The WO#5.1 A100 run returned **`METRIC_OR_SITE_SUSPECT`** on both tags — but the raw
+ladder showed the instrument *works*: zero-ablation hammered the GT logit (Δ≈−7.7), and
+a **full-residual swap at C4's `=` flipped the model's answer to the donor's product on
+100% of items** (`flip_to_donor=1.0`, both tags). Yet the *absolute first-token logit*
+moved by ~0 (Δ≈0.13 / −0.006). Diagnosis: the metric is compressed — many leading-digit
+chunk tokens (`" 108"`, `" 176"`, …) sit at similar logits, so the argmax can flip
+completely while the absolute value stays flat. **So the WO#5 null was (at least partly)
+a metric artifact, not "product unused."**
+
+Cell `82o` (WO#5.1b) re-scores the ladder with **flip-rate-to-target** + **logit-diff
+(target − true token)**, and sweeps the inject across **(layer × k)** including a *late*
+layer (WO#5/5.1 pre-registered the early decodability-peak ~L4, not the composition site
+~L0.85·n). It reuses the cached residuals. Verdict `wo_steer_flip_verdict`: `CALIBRATED@
+(layer,k)` if the rank-1 probe-direction inject flips the answer somewhere (⇒ WO#5 was
+under-powered/under-metriced; re-run C1 there), else `DEAD_DIRECTION` (the swap flips but
+the operand-aligned probe axis never does ⇒ *decoding ≠ causal direction*; switch to
+DAS/gradient directions or a centered operand band). Deliverables:
+`causal_steering_remetric_{base,instruct}.json` + `_summary.csv`. ~15–20 min A100 (cache
+reused).
+
 ## Reproduce
 
 `python3 tests/test_wo_logic.py` (ALL PASS) and `python3 tests/test_wo_steering_mock.py` (ALL PASS)

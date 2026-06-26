@@ -93,6 +93,9 @@ _deliverables = [
     # WORK ORDER #5.1 — steering-instrument calibration (reuses the WO#5 capture):
     "causal_steering_calibration_base.json", "causal_steering_calibration_instruct.json",
     "causal_steering_calibration_summary.csv",
+    # WORK ORDER #5.1b — re-metric (flip-rate + logit-diff):
+    "causal_steering_remetric_base.json", "causal_steering_remetric_instruct.json",
+    "causal_steering_remetric_summary.csv",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:
