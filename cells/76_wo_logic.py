@@ -1723,6 +1723,486 @@ def wo_steer_flip_verdict(zero_abl_moves, swap_flip, layer_k_flips, flip_thr=0.5
 
 
 # ----------------------------------------------------------------------------
+# 8b) WORK ORDER #6 — operand-route localization + dormant-subspace certification.
+# ----------------------------------------------------------------------------
+# Pure substrate for WO#6 (the GPU cells 82r/82s are thin orchestration over
+# these). Two arcs:
+#   EXP A (positive half) — localize the operand->answer computation with
+#     Symmetric-Token-Replacement (STR) counterfactuals (Zhang & Nanda 2309.16042;
+#     NOT Gaussian noising), a teacher-forced multi-token logprob-DIFFERENCE metric
+#     (Heimersheim & Nanda 2404.15255; NOT a first-token logit/probability), cheap
+#     gradient attribution patching (Syed et al.) verified against exact patching.
+#   EXP B (rigorous negative half) — Makelov decompose-and-compare (2311.17030):
+#     split the linearly-decodable product direction at the '=' site into its
+#     logit-affecting vs logit-inert components; if the decodable signal lives in
+#     the logit-inert subspace it is a DORMANT subspace (decodable but causally
+#     disconnected), the interpretability-illusion certification.
+# Every function here is numpy/stdlib-only and unit-tested in tests/test_wo_logic.py
+# BEFORE any A100 time is spent.
+# ----------------------------------------------------------------------------
+
+def wo_corrupt_operand(x, rng, lo=20, hi=49):
+    """A different operand x' with the SAME digit count as x (so the corrupt
+    surface is token-length-matched to the clean surface and every downstream
+    position stays aligned for patching). Generalizes cell-82's _wo_corrupt_C /
+    _wo_corrupt_B to either operand. `rng` is a np.random.Generator (deterministic
+    given its seed). Returns an int x' (x' != x, len(str(x'))==len(str(x))) or None
+    if 64 draws fail to find a digit-count match in [lo, hi]."""
+    nd = len(str(int(x)))
+    for _ in range(64):
+        xp = int(rng.integers(lo, hi + 1))
+        if xp != int(x) and len(str(xp)) == nd:
+            return xp
+    return None
+
+
+def wo_build_str_counterfactual(B, C, which, rng, lo=20, hi=49):
+    """Build ONE Symmetric-Token-Replacement counterfactual for the C1 surface
+    '( 0 + B ) * C ='. `which` in {'C','B'} picks the operand to flip to a
+    digit-count-matched alternative (C->C' or B->B'); the OTHER operand is left
+    intact, so the clean and corrupt surfaces differ in exactly one operand's
+    digits and are token-aligned (STR, not noising). Returns a dict:
+        which, B, C            — clean operands
+        Bp, Cp                 — operands after the flip (one == clean, one flipped)
+        clean_answer  = B*C    — the product the CLEAN surface should produce
+        corrupt_answer= Bp*Cp  — the product the CORRUPT surface should produce
+        digit_aligned          — True iff the flipped operand kept its digit count
+    The clean/corrupt ANSWERS are the two teacher-forced targets the logprob-
+    difference metric contrasts (wo_patch_metric). Returns None if the flip fails
+    (no digit-count match found) or `which` is invalid."""
+    which = str(which).upper()
+    if which not in ("B", "C"):
+        return None
+    B, C = int(B), int(C)
+    if which == "C":
+        Cp = wo_corrupt_operand(C, rng, lo=lo, hi=hi)
+        if Cp is None:
+            return None
+        Bp = B
+    else:
+        Bp = wo_corrupt_operand(B, rng, lo=lo, hi=hi)
+        if Bp is None:
+            return None
+        Cp = C
+    flipped_clean, flipped_corr = (C, Cp) if which == "C" else (B, Bp)
+    return {
+        "which": which, "B": B, "C": C, "Bp": int(Bp), "Cp": int(Cp),
+        "clean_answer": int(B * C), "corrupt_answer": int(Bp * Cp),
+        "digit_aligned": bool(len(str(flipped_clean)) == len(str(flipped_corr))),
+    }
+
+
+def wo_locate_operand_spans(token_strs, B=None, C=None):
+    """Locate the B- and C-operand digit-token spans (plus the structural sites)
+    in a tokenized C1 surface '( 0 + B ) * C ='. Companion to wo_locate_c1_sites,
+    but returns BOTH operands' full token spans (attribution patching reads/writes
+    the whole operand, not a single representative index). Walk:
+        plus    — first '+'
+        rparen  — LAST ')'                        (reuse wo_last_rparen_index)
+        star    — first '*' at/after rparen
+        equals  — LAST '='
+        b_span  — contiguous digit tokens strictly between '+' and ')'
+        c_span  — contiguous digit tokens strictly between '*' and '='
+    Returns a dict with plus/rparen/star/equals/b_span/c_span/roles/ok. If B,C are
+    given, roles verify the recovered digit strings match; `ok` requires both spans
+    non-empty, all sites found, and (when B,C given) the roles verify. A caller MUST
+    check 'ok' before probing (a different tokenizer/format breaks the walk)."""
+    strs = [(t.strip() if isinstance(t, str) else t) for t in token_strs]
+    n = len(strs)
+    out = {"plus": None, "rparen": None, "star": None, "equals": None,
+           "b_span": [], "c_span": [], "roles": {}, "ok": False}
+    plus = wo_first_index_after(strs, "+", 0)
+    rparen = wo_last_rparen_index(strs)
+    out["plus"], out["rparen"] = plus, rparen
+    if plus is None or rparen is None or rparen <= plus:
+        return out
+    star = wo_first_index_after(strs, "*", rparen)
+    eq = wo_last_index(strs, "=")
+    out["star"], out["equals"] = star, eq
+    if star is None or eq is None or eq <= star:
+        return out
+
+    def _digit_span(start_excl, end_excl):
+        span, digits = [], ""
+        for i in range(start_excl + 1, end_excl):
+            s = strs[i]
+            if s == "":
+                if span:
+                    break
+                continue
+            if isinstance(s, str) and s.isdigit():
+                span.append(i)
+                digits += s
+            elif span:
+                break
+        return span, digits
+
+    b_span, b_dig = _digit_span(plus, rparen)
+    c_span, c_dig = _digit_span(star, eq)
+    out["b_span"], out["c_span"] = b_span, c_span
+    roles = {
+        "has_plus": True, "has_rparen": True, "has_star": True, "has_equals": True,
+        "B_matches": (None if B is None else bool(b_dig == str(int(B)))),
+        "C_matches": (None if C is None else bool(c_dig == str(int(C)))),
+    }
+    out["roles"] = roles
+    structural_ok = bool(b_span and c_span)
+    if B is not None and C is not None:
+        structural_ok = structural_ok and roles["B_matches"] and roles["C_matches"]
+    out["ok"] = bool(structural_ok)
+    return out
+
+
+def wo_teacher_forced_logprob(logprob_rows, answer_ids, start):
+    """Teacher-forced sum log-prob of an answer token sequence appended at index
+    `start` of a full prompt+answer sequence. `logprob_rows` is a [seq, vocab]
+    log-softmax matrix (the GPU cell applies log_softmax on device and hands the
+    rows to this pure summer). The token predicting answer position t lives at row
+    `start + t - 1` (causal LM), so D = sum_t logprob_rows[start + t - 1, ans[t]].
+    BYTE-FOR-BYTE the indexing of cell-82p's _fp_logprob, isolated here so the
+    multi-token metric is unit-testable without a model. Robust to a SHARED first
+    answer token (it sums the WHOLE answer, never reads just t=0). Returns a float,
+    or None if start < 1, answer is empty, or an index is out of range."""
+    lp = np.asarray(logprob_rows, dtype=float)
+    ids = [int(a) for a in answer_ids]
+    if lp.ndim != 2 or start < 1 or len(ids) == 0:
+        return None
+    seq, vocab = lp.shape
+    total = 0.0
+    for t, a in enumerate(ids):
+        r = start + t - 1
+        if r < 0 or r >= seq or a < 0 or a >= vocab:
+            return None
+        total += float(lp[r, a])
+    return float(total)
+
+
+def wo_patch_metric(lp_clean_answer, lp_corrupt_answer):
+    """The WO#6 headline metric D = logprob(clean_answer) - logprob(corrupt_answer),
+    each a teacher-forced sum over its FULL multi-token answer (wo_teacher_forced_
+    logprob). A logprob-DIFFERENCE against a contrast (best practice; NOT a bare
+    logprob, NOT a probability, NOT a first-token logit). On the CLEAN surface the
+    clean answer B*C is the continuation so D_clean >> 0; on the CORRUPT surface the
+    corrupt answer Bp*Cp is the continuation so D_corrupt << 0. Pure scalar diff,
+    kept as a named metric so the GPU cell and the tests score identically."""
+    return float(lp_clean_answer) - float(lp_corrupt_answer)
+
+
+def wo_denoise_recovery(d_patched, d_corrupt, d_clean, eps=1e-9):
+    """Denoising recovery fraction = (D_patched - D_corrupt)/(D_clean - D_corrupt):
+    0 at the corrupt baseline, 1 when the patch fully restores the clean metric.
+    For DENOISING we patch CLEAN activations into the CORRUPT run (sufficiency: does
+    restoring this site recover the clean answer?). The eps guards a degenerate
+    (D_clean == D_corrupt) contrast. (Same formula as wo_recovery, named for the
+    denoising direction so the call site reads unambiguously.)"""
+    denom = (float(d_clean) - float(d_corrupt)) + eps
+    return (float(d_patched) - float(d_corrupt)) / denom
+
+
+def wo_attribution_score(a_clean, a_corrupt, grad):
+    """First-order attribution-patching estimate (Syed et al.) of the effect on the
+    metric D of replacing the CORRUPT activation with the CLEAN one at a site:
+        attribution = sum( (a_clean - a_corrupt) * grad )
+    where `grad` = dD/d(activation) evaluated on the CORRUPT run (one backward of D).
+    Sums over ALL element axes, so the caller passes the matching slice for the site
+    being scored — a (d_model,) residual at one (layer,position), a (d_head,) or
+    (n_head,d_head) head slice at hook_z, or a (d_model,) mlp_out. Returns a float
+    (the linear estimate of ΔD, in the SAME units as D); 0.0 on a shape mismatch."""
+    ac = np.asarray(a_clean, dtype=float)
+    aq = np.asarray(a_corrupt, dtype=float)
+    g = np.asarray(grad, dtype=float)
+    if ac.shape != aq.shape or ac.shape != g.shape:
+        return 0.0
+    return float(np.sum((ac - aq) * g))
+
+
+def _wo_rank(vals):
+    """Average ranks of `vals` (ties share the mean rank). Pure numpy helper for
+    Spearman correlation."""
+    a = np.asarray(vals, dtype=float)
+    order = np.argsort(a, kind="mergesort")
+    ranks = np.empty(len(a), dtype=float)
+    ranks[order] = np.arange(len(a), dtype=float)
+    # resolve ties to the average rank (stable, deterministic)
+    _, inv, counts = np.unique(a, return_inverse=True, return_counts=True)
+    csum = np.cumsum(counts)
+    start = csum - counts
+    avg = (start + csum - 1) / 2.0
+    return avg[inv]
+
+
+def wo_attribution_exact_agreement(attrib, exact, top_k=5):
+    """How well the cheap attribution-patching estimate agrees with EXACT activation
+    patching over a set of aligned sites — the Syed-et-al. verification step (a
+    first-order estimate must be checked against the real intervention). `attrib`
+    and `exact` are aligned per-site arrays. Returns a dict:
+        n, pearson         — linear agreement of magnitudes
+        spearman           — rank agreement (robust to attribution's known scaling bias)
+        sign_agreement     — fraction of sites where sign(attrib)==sign(exact)
+        top_k, top_k_overlap — |top-k by |attrib| ∩ top-k by |exact|| / k
+                               (does attribution surface the SAME causal sites?)
+    None-valued fields where a quantity is undefined (n<3 / zero variance / n<k)."""
+    a = np.asarray(attrib, dtype=float).ravel()
+    e = np.asarray(exact, dtype=float).ravel()
+    n = a.size
+    out = {"n": int(n), "pearson": None, "spearman": None,
+           "sign_agreement": None, "top_k": int(top_k), "top_k_overlap": None}
+    if n == 0 or e.size != n:
+        return out
+    out["sign_agreement"] = float(np.mean(np.sign(a) == np.sign(e)))
+    out["pearson"] = wo_pearson(a.tolist(), e.tolist())
+    if n >= 3 and np.std(a) > 0 and np.std(e) > 0:
+        out["spearman"] = wo_pearson(_wo_rank(a).tolist(), _wo_rank(e).tolist())
+    k = int(top_k)
+    if 0 < k <= n:
+        ta = set(np.argsort(-np.abs(a), kind="mergesort")[:k].tolist())
+        te = set(np.argsort(-np.abs(e), kind="mergesort")[:k].tolist())
+        out["top_k_overlap"] = float(len(ta & te) / k)
+    return out
+
+
+def wo_topk_sites(values, k, by_abs=True):
+    """Indices of the top-k sites by value (|value| if by_abs), descending. Pure
+    selector the GPU cell uses to pick which attribution-ranked sites to verify with
+    exact patching. Deterministic (stable sort). Returns at most k indices."""
+    v = np.asarray(values, dtype=float).ravel()
+    if v.size == 0:
+        return []
+    key = -np.abs(v) if by_abs else -v
+    order = np.argsort(key, kind="mergesort")
+    return [int(i) for i in order[: max(0, int(k))]]
+
+
+def _wo_orthonormal_basis(basis, tol=1e-9):
+    """Orthonormal columns spanning the column space of `basis` (d, r), dropping
+    near-zero singular directions. Returns Q (d, r') or None if degenerate/empty.
+
+    The rank threshold is dtype-aware (numpy.linalg.matrix_rank's convention):
+    s_i is kept iff s_i > s_0 * max(s, tol*) where tol* = max(d, r) * eps_float32.
+    The WO#6 readout basis originates as float32 (the unembedding columns), so a
+    rank-deficient basis (e.g. answer-token columns lying in a low-dim subspace)
+    carries ~1e-7 relative numerical noise; the float32-eps floor drops those noise
+    directions so the logit-affecting subspace is the TRUE column space, not the
+    whole ambient space (a too-tight tol would let noise absorb the inert subspace
+    and spuriously inflate R2_row -> a false LOGIT_COUPLED)."""
+    M = np.asarray(basis, dtype=float)
+    if M.ndim == 1:
+        M = M[:, None]
+    if M.ndim != 2 or M.size == 0 or M.shape[1] == 0:
+        return None
+    U, s, _ = np.linalg.svd(M, full_matrices=False)
+    if s.size == 0:
+        return None
+    thresh = s[0] * max(float(tol), max(M.shape) * float(np.finfo(np.float32).eps))
+    keep = s > thresh
+    if not np.any(keep):
+        return None
+    return U[:, keep]
+
+
+def wo_readout_decompose(w, readout_basis, tol=1e-9):
+    """Makelov decompose-and-compare (2311.17030), the vector half: split a decode
+    direction `w` (d,) into the LOGIT-AFFECTING component v_row (its projection onto
+    the readout subspace spanned by `readout_basis`, e.g. the answer-token
+    unembedding columns) and the LOGIT-INERT component v_null (the orthogonal
+    remainder, which the unembedding/late path cannot read). Returns a dict:
+        row_share   = ||v_row||^2 / ||w||^2     (share of w the logits CAN read)
+        inert_share = ||v_null||^2 / ||w||^2    (share that is causally disconnected)
+        r_dim       = dim of the readout subspace actually used
+        v_row, v_null (lists)
+    A decode direction that is dominantly INERT (inert_share ~ 1) is decodable but
+    logit-disconnected — the dormant-subspace signature. Returns None on a zero `w`
+    or a degenerate basis."""
+    wv = np.asarray(w, dtype=float).ravel()
+    wn2 = float(wv @ wv)
+    if wn2 <= 0.0:
+        return None
+    Q = _wo_orthonormal_basis(readout_basis, tol=tol)
+    if Q is None or Q.shape[0] != wv.shape[0]:
+        return None
+    v_row = Q @ (Q.T @ wv)
+    v_null = wv - v_row
+    row2 = float(v_row @ v_row)
+    null2 = float(v_null @ v_null)
+    return {
+        "row_share": row2 / wn2,
+        "inert_share": null2 / wn2,
+        "r_dim": int(Q.shape[1]),
+        "v_row": v_row.tolist(),
+        "v_null": v_null.tolist(),
+    }
+
+
+def wo_readout_decode_split(X, y, readout_basis, folds=5, ridge=1.0, tol=1e-9):
+    """Makelov decompose-and-compare, the decodability half: how much of the linear
+    decode of `y` (the product B*C) from residuals `X` (n,d) survives when the
+    features are restricted to the LOGIT-AFFECTING subspace vs the LOGIT-INERT
+    complement. Project X onto the readout subspace (X_row = X Q, an (n,r) feature
+    set the unembedding can read) and onto its orthogonal complement (X_null =
+    X - (X Q) Q^T, rank d-r, logit-inert), and score CV-R^2 (wo_cv_r2) of each plus
+    full X. Returns a dict:
+        R2_full  — decode-R^2 from the whole residual           (the headline ~0.96)
+        R2_row   — decode-R^2 from the logit-affecting subspace
+        R2_null  — decode-R^2 from the logit-inert complement
+        r_dim    — readout subspace dimension
+    If R2_null ~ R2_full >> R2_row, the decodable product lives in the dormant
+    (logit-inert) subspace — decodable but causally disconnected from the weights.
+    None-valued R^2 fields where wo_cv_r2 is degenerate; None if the basis is bad."""
+    Xm = np.asarray(X, dtype=float)
+    if Xm.ndim != 2:
+        return None
+    Q = _wo_orthonormal_basis(readout_basis, tol=tol)
+    if Q is None or Q.shape[0] != Xm.shape[1]:
+        return None
+    Xrow = Xm @ Q                       # (n, r) coords in the logit-affecting subspace
+    Xnull = Xm - (Xm @ Q) @ Q.T         # (n, d) residual in the logit-inert complement
+    return {
+        "R2_full": wo_cv_r2(Xm, y, folds=folds, ridge=ridge),
+        "R2_row": wo_cv_r2(Xrow, y, folds=folds, ridge=ridge),
+        "R2_null": wo_cv_r2(Xnull, y, folds=folds, ridge=ridge),
+        "r_dim": int(Q.shape[1]),
+    }
+
+
+def wo_jsonsafe(obj):
+    """Recursively coerce a payload to STRICT-JSON-safe values: NaN/Inf -> None,
+    numpy scalars -> python scalars, numpy arrays/tuples -> lists. json.dumps emits
+    a bare `NaN` token for float('nan') (rejected by strict parsers); the WO#6
+    deliverables are consumed downstream, so we sanitize before writing. Pure."""
+    if obj is None or isinstance(obj, (bool, str, int)):
+        return obj
+    if isinstance(obj, float):
+        return None if (math.isnan(obj) or math.isinf(obj)) else obj
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        v = float(obj)
+        return None if (math.isnan(v) or math.isinf(v)) else v
+    if isinstance(obj, np.ndarray):
+        return [wo_jsonsafe(x) for x in obj.tolist()]
+    if isinstance(obj, dict):
+        return {str(k): wo_jsonsafe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [wo_jsonsafe(x) for x in obj]
+    return obj
+
+
+def wo_dormant_verdict(inert_share, r2_row, r2_null, r2_full,
+                       inert_thr=0.5, recover_frac=0.7, row_margin=0.2,
+                       r2_full_min=0.3, n=None, min_n=10):
+    """Certify whether the linearly-decodable product at the '=' site is a DORMANT
+    subspace (Makelov interpretability-illusion), combining the two decompose-and-
+    compare reads. Fires:
+      DORMANT_CERTIFIED — the decode direction is dominantly logit-inert
+        (inert_share >= inert_thr) AND the logit-inert complement recovers most of
+        the decode (R2_null >= recover_frac * R2_full) AND the logit-affecting
+        subspace carries little of it (R2_row <= R2_full - row_margin). Decodable
+        but causally disconnected: the dormant-subspace certification.
+      LOGIT_COUPLED — the decode direction is mostly in the readout row space
+        (inert_share < inert_thr) and the logit-affecting subspace carries the
+        decode (R2_row >= R2_full - row_margin): the representation IS readable by
+        the logits, so NOT dormant on this evidence.
+      INCONCLUSIVE — neither pattern is clean (e.g. signal split across both
+        subspaces, or an R^2 is undefined).
+    Returns {label, reason, inert_share, R2_row, R2_null, R2_full}."""
+    out = {"label": "INCONCLUSIVE", "reason": "", "inert_share": _wo_num(inert_share),
+           "R2_row": _wo_num(r2_row), "R2_null": _wo_num(r2_null), "R2_full": _wo_num(r2_full),
+           "n": (None if n is None else int(n))}
+    if inert_share is None or r2_full is None or r2_null is None or r2_row is None:
+        out["reason"] = "a required quantity is undefined (inert_share / R^2 None)."
+        return out
+    if n is not None and int(n) < int(min_n):
+        out["reason"] = (f"under-powered (n={int(n)} < {int(min_n)}): the held-out decode-R^2 "
+                         "estimates are too variable to support a dormant claim.")
+        return out
+    if float(r2_full) < float(r2_full_min):
+        out["reason"] = (f"decodability too weak (R^2_full={_wo_fmt(r2_full)} < {r2_full_min:g}): "
+                         "the product is poorly represented everywhere, so 'dormant' is not "
+                         "meaningful — neither subspace carries a strong signal.")
+        return out
+    inert_share = float(inert_share); r2_row = float(r2_row)
+    r2_null = float(r2_null); r2_full = float(r2_full)
+    null_recovers = (r2_full > 0) and (r2_null >= recover_frac * r2_full)
+    row_weak = r2_row <= (r2_full - row_margin)
+    row_strong = r2_row >= (r2_full - row_margin)
+    if inert_share >= inert_thr and null_recovers and row_weak:
+        out["label"] = "DORMANT_CERTIFIED"
+        out["reason"] = (
+            f"the product decode direction is {_wo_fmt(inert_share)} logit-inert and the "
+            f"logit-inert complement recovers R^2={_wo_fmt(r2_null)} (>= {recover_frac:g}*"
+            f"{_wo_fmt(r2_full)}) while the logit-affecting subspace recovers only "
+            f"R^2={_wo_fmt(r2_row)} — decodable but causally disconnected from the weights "
+            "(Makelov dormant subspace).")
+    elif inert_share < inert_thr and row_strong:
+        out["label"] = "LOGIT_COUPLED"
+        out["reason"] = (
+            f"the decode direction is {_wo_fmt(1.0 - inert_share)} inside the readout row "
+            f"space and that subspace carries the decode (R^2_row={_wo_fmt(r2_row)} ~ "
+            f"R^2_full={_wo_fmt(r2_full)}): the product is readable by the logits, not dormant.")
+    else:
+        out["reason"] = (
+            f"mixed: inert_share={_wo_fmt(inert_share)}, R^2_row={_wo_fmt(r2_row)}, "
+            f"R^2_null={_wo_fmt(r2_null)}, R^2_full={_wo_fmt(r2_full)} — the decode is not "
+            "cleanly carried by either subspace; no certification.")
+    return out
+
+
+def _wo_num(x):
+    """float(x) or None (json-safe numeric coercion for verdict payloads)."""
+    return None if x is None else float(x)
+
+
+def wo_localization_verdict(operand_pos_recovery, best_head_recovery, n_heads_for_half,
+                            recover_thr=0.4, sparse_max=8):
+    """Classify WHERE the operand->answer computation lives, from EXACT denoising-
+    patch recoveries (fraction of the clean metric D restored by patching a CLEAN
+    site into the CORRUPT run). The honest fork the paper turns on:
+      LOCALIZED_OPERAND_ROUTE — restoring the flipped operand's position recovers
+        the clean answer (operand_pos_recovery >= recover_thr) AND the operand->last-
+        token movement runs through a SPARSE set of heads (best_head_recovery >=
+        recover_thr, or only n_heads_for_half <= sparse_max heads are needed to
+        restore half of D): the Stolfo et al. operand->answer route exists.
+      DISTRIBUTED_NO_LOCUS — the operand position matters, but NO sparse head set
+        reaches threshold (best_head_recovery < recover_thr AND n_heads_for_half >
+        sparse_max or never reached): the answer is recomputed by a diffuse bag of
+        heuristics (Nikankin) with no single causal locus — a publishable negative.
+      INCONCLUSIVE — even the flipped operand's own position fails to recover
+        (operand_pos_recovery < recover_thr): an instrument/site problem, not a
+        result. Returns {label, reason, ...inputs}. n_heads_for_half=None means the
+        cumulative head recovery never reached half (treated as > sparse_max)."""
+    nfh = (10 ** 9) if n_heads_for_half is None else int(n_heads_for_half)
+    out = {"label": "INCONCLUSIVE", "reason": "",
+           "operand_pos_recovery": _wo_num(operand_pos_recovery),
+           "best_head_recovery": _wo_num(best_head_recovery),
+           "n_heads_for_half": (None if n_heads_for_half is None else int(n_heads_for_half))}
+    if operand_pos_recovery is None or best_head_recovery is None:
+        out["reason"] = "a required recovery is undefined (None)."
+        return out
+    opr = float(operand_pos_recovery); bhr = float(best_head_recovery)
+    if opr < recover_thr:
+        out["reason"] = (f"the flipped operand's own position recovers only "
+                         f"{_wo_fmt(opr)} (< {recover_thr:g}) of the clean metric — the "
+                         "patch/metric/site is not validated; not a localization result.")
+        return out
+    sparse_heads = (bhr >= recover_thr) or (nfh <= sparse_max)
+    if sparse_heads:
+        out["label"] = "LOCALIZED_OPERAND_ROUTE"
+        out["reason"] = (f"restoring the flipped operand position recovers {_wo_fmt(opr)} of D "
+                         f"and a sparse head set carries the operand->last-token movement "
+                         f"(best head recovery {_wo_fmt(bhr)}, {out['n_heads_for_half']} heads "
+                         f"for half D) — the Stolfo operand->answer route.")
+    else:
+        out["label"] = "DISTRIBUTED_NO_LOCUS"
+        out["reason"] = (f"the operand position matters (recovery {_wo_fmt(opr)}) but no sparse "
+                         f"head set recovers the answer (best head {_wo_fmt(bhr)} < {recover_thr:g}, "
+                         f">{sparse_max} heads needed for half D) — the product is recomputed by a "
+                         "diffuse bag of heuristics (Nikankin), no single causal locus.")
+    return out
+
+
+# ----------------------------------------------------------------------------
 # 9) Inline self-test (runs on every notebook execution; CPU only, ~instant).
 #    Mirrors tests/test_wo_logic.py so a notebook run also fails loudly if the
 #    decision logic is wrong. Uses the PUBLISHED base numbers as fixtures.
@@ -1923,6 +2403,74 @@ def _wo_selftest():
     assert wo_steer_flip_verdict(True, 1.0, [(4, 1, 0.0), (30, 32, 0.1)])["label"] == "DEAD_DIRECTION"
     assert wo_steer_flip_verdict(True, 0.0, [(4, 1, 0.9)])["label"] == "METRIC_OR_SITE_SUSPECT"
     assert wo_steer_flip_verdict(False, 1.0, [(4, 1, 0.9)])["label"] == "INSTRUMENT_BROKEN"
+
+    # ----- WORK ORDER #6 — operand-route localization + dormant certification -----
+    _w6_rng = np.random.default_rng(0)
+    # STR counterfactual: digit-count-matched flip, correct clean/corrupt answers.
+    _w6_cf = wo_build_str_counterfactual(23, 47, "C", _w6_rng)
+    assert _w6_cf["clean_answer"] == 23 * 47 and _w6_cf["corrupt_answer"] == 23 * _w6_cf["Cp"]
+    assert _w6_cf["Cp"] != 47 and len(str(_w6_cf["Cp"])) == 2 and _w6_cf["Bp"] == 23
+    assert wo_build_str_counterfactual(23, 47, "B", _w6_rng)["Cp"] == 47   # B-flip leaves C
+    assert wo_build_str_counterfactual(23, 47, "Q", _w6_rng) is None       # bad operand key
+    assert wo_corrupt_operand(31, np.random.default_rng(1)) != 31
+    # Operand span locator on the C1 surface "( 0 + 23 ) * 47 =" (digits split).
+    _w6_toks = ["(", "0", "+", "2", "3", ")", "*", "4", "7", "="]
+    _w6_loc = wo_locate_operand_spans(_w6_toks, 23, 47)
+    assert _w6_loc["ok"] and _w6_loc["b_span"] == [3, 4] and _w6_loc["c_span"] == [7, 8]
+    assert _w6_loc["rparen"] == 5 and _w6_loc["star"] == 6 and _w6_loc["equals"] == 9
+    assert not wo_locate_operand_spans(_w6_toks, 99, 47)["ok"]             # wrong B -> not ok
+    # Teacher-forced multi-token logprob + the patch metric D.
+    _w6_lp = np.log(np.full((6, 5), 0.2))                                  # uniform -> log 0.2 each
+    _w6_lp[2, 3] = np.log(0.9); _w6_lp[3, 1] = np.log(0.8)                 # boost ans tokens
+    _w6_tf = wo_teacher_forced_logprob(_w6_lp, [3, 1], start=3)            # rows 2 and 3
+    assert abs(_w6_tf - (np.log(0.9) + np.log(0.8))) < 1e-9
+    assert wo_teacher_forced_logprob(_w6_lp, [3], start=0) is None         # start<1 invalid
+    assert wo_patch_metric(-2.0, -9.0) == 7.0
+    assert abs(wo_denoise_recovery(0.0, -10.0, 10.0) - 0.5) < 1e-9
+    assert wo_denoise_recovery(10.0, -10.0, 10.0) > 0.99
+    # Attribution math + attribution-vs-exact agreement.
+    _w6_ac = np.array([1.0, 2.0, 3.0]); _w6_aq = np.array([0.0, 0.0, 0.0])
+    _w6_g = np.array([1.0, 1.0, 1.0])
+    assert wo_attribution_score(_w6_ac, _w6_aq, _w6_g) == 6.0
+    assert wo_attribution_score(_w6_ac, _w6_aq, np.zeros(2)) == 0.0        # shape mismatch -> 0
+    _w6_attr = np.array([5.0, -3.0, 0.1, 2.0, -4.0])
+    _w6_exact = np.array([4.0, -2.5, 0.2, 1.5, -3.5])                      # same ranks/signs
+    _w6_ag = wo_attribution_exact_agreement(_w6_attr, _w6_exact, top_k=2)
+    assert _w6_ag["sign_agreement"] == 1.0 and _w6_ag["top_k_overlap"] == 1.0
+    assert _w6_ag["spearman"] is not None and _w6_ag["spearman"] > 0.99
+    assert wo_topk_sites(_w6_attr, 2) == [0, 4]                            # |5| then |-4|
+    # Makelov decompose: a direction inside the readout span is logit-AFFECTING;
+    # orthogonal to it is logit-INERT.
+    _w6_basis = np.eye(6)[:, :2]                                           # span of axes 0,1
+    _w6_dec_row = wo_readout_decompose(np.array([1.0, 1.0, 0, 0, 0, 0]), _w6_basis)
+    assert _w6_dec_row["inert_share"] < 1e-9 and _w6_dec_row["row_share"] > 0.999
+    _w6_dec_null = wo_readout_decompose(np.array([0, 0, 0, 1.0, 1.0, 0]), _w6_basis)
+    assert _w6_dec_null["inert_share"] > 0.999
+    assert wo_readout_decompose(np.zeros(6), _w6_basis) is None
+    # decode-split: y readable from a logit-inert axis -> R2_null carries it, R2_row ~ 0.
+    _w6_n = 60
+    _w6_rng2 = np.random.default_rng(2)
+    _w6_y = _w6_rng2.standard_normal(_w6_n)
+    _w6_X = 0.05 * _w6_rng2.standard_normal((_w6_n, 6))
+    _w6_X[:, 3] += 3.0 * _w6_y                                             # y lives on INERT axis 3
+    _w6_split = wo_readout_decode_split(_w6_X, _w6_y, _w6_basis)
+    assert _w6_split["R2_null"] > 0.5 and (_w6_split["R2_row"] or 0.0) < 0.3
+    _w6_vd = wo_dormant_verdict(0.95, _w6_split["R2_row"], _w6_split["R2_null"], _w6_split["R2_full"])
+    assert _w6_vd["label"] == "DORMANT_CERTIFIED"
+    assert wo_dormant_verdict(0.05, 0.95, 0.10, 0.96)["label"] == "LOGIT_COUPLED"
+    assert wo_dormant_verdict(0.5, 0.5, 0.5, 0.96)["label"] == "INCONCLUSIVE"
+    assert wo_dormant_verdict(0.95, 0.05, 0.20, 0.25)["label"] == "INCONCLUSIVE"        # weak R2_full
+    assert wo_dormant_verdict(0.95, 0.05, 0.90, 0.95, n=5)["label"] == "INCONCLUSIVE"   # under-powered
+    # json sanitizer: NaN/Inf -> None, numpy -> python.
+    assert wo_jsonsafe(float("nan")) is None and wo_jsonsafe(float("inf")) is None
+    assert wo_jsonsafe({"a": np.int64(3), "b": [np.float64(1.5), float("nan")]}) == {"a": 3, "b": [1.5, None]}
+    assert wo_jsonsafe(np.array([1.0, np.nan])) == [1.0, None]
+    # localization verdict fork.
+    assert wo_localization_verdict(0.8, 0.6, 3)["label"] == "LOCALIZED_OPERAND_ROUTE"
+    assert wo_localization_verdict(0.8, 0.2, 20)["label"] == "DISTRIBUTED_NO_LOCUS"
+    assert wo_localization_verdict(0.8, 0.2, None)["label"] == "DISTRIBUTED_NO_LOCUS"
+    assert wo_localization_verdict(0.1, 0.9, 1)["label"] == "INCONCLUSIVE"
+    assert wo_localization_verdict(0.8, 0.1, 4)["label"] == "LOCALIZED_OPERAND_ROUTE"   # sparse via n_heads
     return True
 
 

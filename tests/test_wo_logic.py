@@ -897,6 +897,196 @@ def test_steer_flip_verdict():
           fv(True, 1.0, [(30, 4, 0.6)], flip_thr=0.8)["label"] == "DEAD_DIRECTION")
 
 
+# ============================================================================
+# WORK ORDER #6 — operand-route localization + dormant-subspace certification.
+# ============================================================================
+def test_wo6_str_counterfactual_builder():
+    import numpy as np
+    cf = WO["wo_build_str_counterfactual"]
+    co = WO["wo_corrupt_operand"]
+    rng = np.random.default_rng(0)
+    # C-flip: only C changes, digit count preserved, answers correct.
+    r = cf(23, 47, "C", rng)
+    check("C-flip leaves B intact", r["Bp"] == 23)
+    check("C-flip changes C", r["Cp"] != 47)
+    check("C-flip digit-count matched", len(str(r["Cp"])) == len(str(47)) and r["digit_aligned"])
+    check("clean answer = B*C", r["clean_answer"] == 23 * 47)
+    check("corrupt answer = Bp*Cp", r["corrupt_answer"] == 23 * r["Cp"])
+    # B-flip: only B changes.
+    r2 = cf(31, 28, "B", rng)
+    check("B-flip leaves C intact", r2["Cp"] == 28)
+    check("B-flip changes B", r2["Bp"] != 31)
+    check("B-flip corrupt answer = Bp*C", r2["corrupt_answer"] == r2["Bp"] * 28)
+    # invalid operand key.
+    check("bad 'which' -> None", cf(23, 47, "X", rng) is None)
+    # corrupt_operand: digit-count preserving, deterministic given rng.
+    vals = [co(45, np.random.default_rng(7)) for _ in range(5)]
+    check("corrupt_operand deterministic per seed", len(set(vals)) == 1)
+    check("corrupt_operand != original", co(45, np.random.default_rng(7)) != 45)
+    check("corrupt_operand keeps 2 digits in band", 20 <= co(45, np.random.default_rng(3)) <= 49)
+
+
+def test_wo6_locate_operand_spans():
+    loc = WO["wo_locate_operand_spans"]
+    toks = ["(", "0", "+", "2", "3", ")", "*", "4", "7", "="]
+    out = loc(toks, 23, 47)
+    check("locator ok on aligned surface", out["ok"])
+    check("B span = the two B-digit tokens", out["b_span"] == [3, 4])
+    check("C span = the two C-digit tokens", out["c_span"] == [7, 8])
+    check("rparen/star/equals located", (out["rparen"], out["star"], out["equals"]) == (5, 6, 9))
+    # single-digit-token operands (tokenizer that merges digits).
+    out1 = loc(["(", "0", "+", "23", ")", "*", "47", "="], 23, 47)
+    check("merged-digit operands locate", out1["ok"] and out1["b_span"] == [3] and out1["c_span"] == [6])
+    # role mismatch -> not ok.
+    check("wrong B fails role check", not loc(toks, 99, 47)["ok"])
+    # missing '*' -> not ok, no crash.
+    check("missing star -> not ok", not loc(["(", "0", "+", "2", "3", ")", "4", "7", "="], 23, 47)["ok"])
+    # B,C omitted: structural ok if spans present.
+    check("structural ok without B,C", loc(toks)["ok"])
+
+
+def test_wo6_teacher_forced_logprob_and_metric():
+    import numpy as np
+    tf = WO["wo_teacher_forced_logprob"]
+    pm = WO["wo_patch_metric"]
+    rec = WO["wo_denoise_recovery"]
+    lp = np.log(np.full((6, 5), 0.2))
+    lp[2, 3] = np.log(0.9)   # predicts answer token 0 (id 3) from row start-1=2
+    lp[3, 1] = np.log(0.8)   # predicts answer token 1 (id 1) from row 3
+    val = tf(lp, [3, 1], start=3)
+    check("teacher-forced sum over BOTH answer tokens", abs(val - (np.log(0.9) + np.log(0.8))) < 1e-9)
+    # robust to a SHARED first token: differs only in the 2nd token.
+    lpc = np.log(np.full((6, 5), 0.2)); lpc[2, 3] = np.log(0.5); lpc[3, 2] = np.log(0.9)
+    shared_clean = tf(lpc, [3, 2], start=3)   # clean answer = tokens 3,2
+    shared_corr = tf(lpc, [3, 4], start=3)    # corrupt answer shares token0=3, differs token1
+    check("shared first token still discriminates via later tokens", shared_clean != shared_corr)
+    check("start<1 invalid -> None", tf(lp, [3], start=0) is None)
+    check("out-of-range token -> None", tf(lp, [999], start=3) is None)
+    # D and recovery.
+    check("D = lp_clean - lp_corrupt", pm(-2.0, -9.0) == 7.0)
+    check("D_clean >> 0 on clean run", pm(-1.0, -12.0) > 0)
+    check("D_corrupt << 0 on corrupt run", pm(-12.0, -1.0) < 0)
+    check("recovery 0 at corrupt baseline", abs(rec(-10.0, -10.0, 10.0) - 0.0) < 1e-9)
+    check("recovery 1 at clean baseline", abs(rec(10.0, -10.0, 10.0) - 1.0) < 1e-6)
+    check("recovery 0.5 midway", abs(rec(0.0, -10.0, 10.0) - 0.5) < 1e-9)
+
+
+def test_wo6_attribution_math():
+    import numpy as np
+    score = WO["wo_attribution_score"]
+    agree = WO["wo_attribution_exact_agreement"]
+    topk = WO["wo_topk_sites"]
+    # attribution = sum((a_clean - a_corrupt) * grad).
+    ac = np.array([1.0, 2.0, 3.0]); aq = np.array([0.0, 1.0, 1.0]); g = np.array([2.0, 0.0, 1.0])
+    check("attribution score = sum (Δact * grad)", score(ac, aq, g) == (1.0 * 2.0 + 1.0 * 0.0 + 2.0 * 1.0))
+    check("shape mismatch -> 0.0", score(ac, aq, np.zeros(2)) == 0.0)
+    check("zero delta -> 0.0", score(ac, ac, g) == 0.0)
+    # 2D slice (e.g. a head's [pos, d_head]) sums over all axes.
+    check("attribution sums over all axes", score(np.ones((2, 3)), np.zeros((2, 3)), np.ones((2, 3))) == 6.0)
+    # attribution-vs-exact agreement.
+    attr = np.array([5.0, -3.0, 0.1, 2.0, -4.0])
+    exact = np.array([4.2, -2.5, 0.3, 1.8, -3.6])     # same signs + ranks
+    a = agree(attr, exact, top_k=2)
+    check("perfect sign agreement", a["sign_agreement"] == 1.0)
+    check("spearman ~ 1 on rank-matched", a["spearman"] is not None and a["spearman"] > 0.99)
+    check("top-2 overlap = 1", a["top_k_overlap"] == 1.0)
+    # sign-flipped exact -> zero sign agreement.
+    aflip = agree(attr, -exact, top_k=2)
+    check("sign-flipped -> 0 sign agreement", aflip["sign_agreement"] == 0.0)
+    check("empty -> n=0, fields None", agree([], [])["pearson"] is None)
+    # topk by |value|.
+    check("topk picks largest |value| first", topk(attr, 2) == [0, 4])
+    check("topk by_abs=False picks signed max", topk(attr, 1, by_abs=False) == [0])
+    check("topk empty -> []", topk([], 3) == [])
+
+
+def test_wo6_readout_decompose_and_dormant():
+    import numpy as np
+    dec = WO["wo_readout_decompose"]
+    split = WO["wo_readout_decode_split"]
+    verdict = WO["wo_dormant_verdict"]
+    basis = np.eye(6)[:, :2]   # readout subspace = axes 0,1
+    # direction inside the readout span -> logit-affecting.
+    din = dec(np.array([1.0, 1.0, 0, 0, 0, 0]), basis)
+    check("in-span direction is ~0 inert", din["inert_share"] < 1e-9)
+    check("in-span direction is ~1 row", din["row_share"] > 0.999)
+    check("row+inert shares sum to 1", abs(din["row_share"] + din["inert_share"] - 1.0) < 1e-9)
+    # direction orthogonal to readout span -> logit-inert (dormant signature).
+    dnull = dec(np.array([0, 0, 1.0, 1.0, 0, 0]), basis)
+    check("orthogonal direction is ~1 inert", dnull["inert_share"] > 0.999)
+    # half-in, half-out.
+    dhalf = dec(np.array([1.0, 0, 1.0, 0, 0, 0]), basis)
+    check("split direction ~0.5 inert", abs(dhalf["inert_share"] - 0.5) < 1e-9)
+    check("zero w -> None", dec(np.zeros(6), basis) is None)
+    check("rank-deficient basis handled", dec(np.array([1.0, 0, 0, 0, 0, 0]), np.zeros((6, 2))) is None)
+    # dtype-aware rank: a float32 basis that genuinely spans only axes 0,1 must NOT let
+    # numerical noise absorb the orthogonal (inert) directions (else R2_row inflates).
+    rng_b = np.random.default_rng(5)
+    cols = np.zeros((8, 30), dtype=np.float32)
+    cols[0] = rng_b.standard_normal(30).astype(np.float32)        # columns live in span(e0, e1)
+    cols[1] = rng_b.standard_normal(30).astype(np.float32)
+    cols += (1e-7 * rng_b.standard_normal((8, 30))).astype(np.float32)   # float32-level noise
+    d_inert = dec(np.eye(8)[7], cols)                            # axis 7 is in the orthogonal complement
+    check("rank-2 float32 basis: orthogonal axis stays inert (noise dirs dropped)",
+          d_inert is not None and d_inert["inert_share"] > 0.9)
+    # decode-split: y readable from an INERT axis -> null carries it.
+    n = 80
+    rng = np.random.default_rng(11)
+    y = rng.standard_normal(n)
+    X = 0.05 * rng.standard_normal((n, 6))
+    X[:, 3] += 3.0 * y          # signal on inert axis 3 (outside readout span)
+    s = split(X, y, basis)
+    check("R2_full recovers y", s["R2_full"] > 0.8)
+    check("R2_null carries the decode", s["R2_null"] > 0.8)
+    check("R2_row near zero (signal not in readout span)", (s["R2_row"] or 0.0) < 0.3)
+    check("dormant: certified", verdict(0.95, s["R2_row"], s["R2_null"], s["R2_full"])["label"] == "DORMANT_CERTIFIED")
+    # contrast: signal on a readout axis -> logit-coupled.
+    X2 = 0.05 * rng.standard_normal((n, 6)); X2[:, 0] += 3.0 * y
+    s2 = split(X2, y, basis)
+    check("readout-axis signal: R2_row carries it", s2["R2_row"] > 0.8)
+    check("logit-coupled verdict", verdict(0.05, s2["R2_row"], s2["R2_null"], s2["R2_full"])["label"] == "LOGIT_COUPLED")
+    check("undefined R2 -> inconclusive", verdict(0.9, None, 0.9, 0.9)["label"] == "INCONCLUSIVE")
+    # guards: weak overall decodability + under-power must NOT certify dormant.
+    check("weak R2_full -> inconclusive (no dormant on weak signal)",
+          verdict(0.95, 0.05, 0.22, 0.25)["label"] == "INCONCLUSIVE")
+    check("under-powered n<min_n -> inconclusive",
+          verdict(0.95, 0.05, 0.90, 0.95, n=5)["label"] == "INCONCLUSIVE")
+    check("strong + powered still certifies", verdict(0.95, 0.05, 0.90, 0.95, n=40)["label"] == "DORMANT_CERTIFIED")
+
+
+def test_wo6_jsonsafe():
+    import numpy as np
+    js = WO["wo_jsonsafe"]
+    check("NaN -> None", js(float("nan")) is None)
+    check("Inf -> None", js(float("inf")) is None)
+    check("numpy int -> python int", js(np.int64(3)) == 3 and isinstance(js(np.int64(3)), int))
+    check("numpy float -> python float", js(np.float64(1.5)) == 1.5)
+    check("numpy nan float -> None", js(np.float64("nan")) is None)
+    check("nested dict/list sanitized",
+          js({"a": np.int64(2), "b": [np.float64(1.0), float("nan"), "x"], "c": None})
+          == {"a": 2, "b": [1.0, None, "x"], "c": None})
+    check("ndarray -> list with None for nan", js(np.array([1.0, np.nan, 3.0])) == [1.0, None, 3.0])
+    import json as _json
+    check("output is strict-JSON serializable",
+          _json.loads(_json.dumps(js({"x": float("nan"), "y": np.float64(2.0)}))) == {"x": None, "y": 2.0})
+
+
+def test_wo6_localization_verdict():
+    lv = WO["wo_localization_verdict"]
+    check("sparse heads + operand recovers -> localized",
+          lv(0.8, 0.6, 3)["label"] == "LOCALIZED_OPERAND_ROUTE")
+    check("sparse via few-heads-for-half -> localized",
+          lv(0.8, 0.1, 4)["label"] == "LOCALIZED_OPERAND_ROUTE")
+    check("diffuse heads -> distributed (bag of heuristics)",
+          lv(0.8, 0.2, 20)["label"] == "DISTRIBUTED_NO_LOCUS")
+    check("never-reaches-half (None) -> distributed",
+          lv(0.8, 0.2, None)["label"] == "DISTRIBUTED_NO_LOCUS")
+    check("operand position itself fails -> inconclusive",
+          lv(0.1, 0.9, 1)["label"] == "INCONCLUSIVE")
+    check("None recovery -> inconclusive", lv(None, 0.9, 1)["label"] == "INCONCLUSIVE")
+    check("threshold is tunable", lv(0.45, 0.0, 99, recover_thr=0.5)["label"] == "INCONCLUSIVE")
+
+
 def main():
     for fn in sorted(g for g in globals() if g.startswith("test_")):
         print(f"\n{fn}:")

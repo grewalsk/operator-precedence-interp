@@ -102,6 +102,13 @@ _deliverables = [
     # WORK ORDER #5.1d — late-layer full-swap sweep (localize the causal answer site):
     "causal_steering_lateswap_base.json", "causal_steering_lateswap_instruct.json",
     "causal_steering_lateswap_summary.csv",
+    # WORK ORDER #6 — operand-route localization (A: STR attribution + exact patch):
+    "operand_position_patch_base.json", "operand_position_patch_instruct.json",
+    "operand_position_patch_base.png", "operand_position_patch_instruct.png",
+    "operand_localization_summary.csv",
+    # WORK ORDER #6 — path patching (A4) + dormant certification (B1/B2):
+    "head_path_patch_base.json", "head_path_patch_instruct.json",
+    "dormant_certification_base.json", "dormant_certification_instruct.json",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:
