@@ -1,0 +1,42 @@
+{
+  "tag": "base",
+  "n_pairs": 200,
+  "layers": [
+    23,
+    31
+  ],
+  "readout_space": "post_ln",
+  "n_unique_answer_tokens": 1,
+  "per_layer": [
+    {
+      "layer": 23,
+      "inert_share": null,
+      "row_share": null,
+      "r_dim": null,
+      "R2_full": null,
+      "R2_row": null,
+      "R2_null": null,
+      "verdict": "INCONCLUSIVE",
+      "reason": "a required quantity is undefined (inert_share / R^2 None)."
+    },
+    {
+      "layer": 31,
+      "inert_share": null,
+      "row_share": null,
+      "r_dim": null,
+      "R2_full": null,
+      "R2_row": null,
+      "R2_null": null,
+      "verdict": "INCONCLUSIVE",
+      "reason": "a required quantity is undefined (inert_share / R^2 None)."
+    }
+  ],
+  "headline_layer": 31,
+  "headline_verdict": "INCONCLUSIVE",
+  "references_WO5": {
+    "WO5.1d_full_swap": "full-residual swap at the '=' site flips the answer to the donor's product (the site carries the answer), yet the probe-direction inject is DEAD_DIRECTION \u2014 the DECODABLE direction is not a causal handle.",
+    "WO5_expB_selectivity": "OPERANDS_ONLY: product-R^2 at '=' (~0.97) does not exceed the linear-(B,C) baseline (~0.968) \u2014 the decode is operand-reconstructible.",
+    "decode_R2": "B*C linearly decodable at the '=' site at R^2 ~ 0.96-0.98 (WO#3 / WO#5)."
+  },
+  "note": "decode direction fit by wo_fit_ridge_probe at the clean C1 '=' residual; readout basis = centered unembedding columns of the realized clean-answer first tokens (the logit-affecting subspace the '=' residual feeds). When the model exposes ln_final the residual is taken in POST-LayerNorm space (readout_space='post_ln'), so logit-affecting = span(W_U cols) is EXACT (no isometry assumption); else raw. The dormant verdict downgrades to INCONCLUSIVE when under-powered (n<10) or R2_full is too weak. DAS is NOT used."
+}

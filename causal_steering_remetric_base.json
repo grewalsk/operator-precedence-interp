@@ -157,5 +157,5 @@
     "reason": "The full swap flips the answer (rate 1.000), AND the scaled probe-direction inject flips it at rate 1.000 at layer 4, k=1: WO#5's null was a metric/magnitude artifact, not 'product unused'. Re-run the C1 steering test at (layer 4, k=1)."
   },
   "flip_thr": 0.5,
-  "note": "Re-scores the WO#5.1 ladder with FLIP-RATE-to-target + LOGIT-DIFF."
+  "note": "Re-scores the WO#5.1 ladder with FLIP-RATE-to-target + LOGIT-DIFF (the absolute first-token logit was compressed). Full swap flip + the inject (layer\u00d7k) flip sweep decide CALIBRATED (metric/magnitude artifact) vs DEAD_DIRECTION (wrong causal axis)."
 }

@@ -90,6 +90,24 @@ deliverables produced (ART/results):
   [x] causal_steering_calibration_base.json
   [x] causal_steering_calibration_instruct.json
   [x] causal_steering_calibration_summary.csv
+  [x] causal_steering_remetric_base.json
+  [x] causal_steering_remetric_instruct.json
+  [x] causal_steering_remetric_summary.csv
+  [x] causal_steering_fullproduct_base.json
+  [x] causal_steering_fullproduct_instruct.json
+  [x] causal_steering_fullproduct_summary.csv
+  [x] causal_steering_lateswap_base.json
+  [x] causal_steering_lateswap_instruct.json
+  [x] causal_steering_lateswap_summary.csv
+  [x] operand_position_patch_base.json
+  [x] operand_position_patch_instruct.json
+  [x] operand_position_patch_base.png
+  [x] operand_position_patch_instruct.png
+  [x] operand_localization_summary.csv
+  [x] head_path_patch_base.json
+  [x] head_path_patch_instruct.json
+  [x] dormant_certification_base.json
+  [x] dormant_certification_instruct.json
 
 # Reproduce: open the notebook, set HF_TOKEN, Run All. All forward passes are
 # cached per (model-tag, condition) under ART; a fresh runtime resumes from disk.

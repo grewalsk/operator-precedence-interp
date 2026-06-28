@@ -1,0 +1,79 @@
+{
+  "tag": "base",
+  "n_used": 48,
+  "heads": [
+    {
+      "layer": 14,
+      "head": 16,
+      "total_recovery": -0.015146942994267209,
+      "direct_recovery": -1.406141967763108e-05,
+      "mediated_recovery": -0.015132881574589578,
+      "direct_share": null,
+      "classification": "INCONCLUSIVE"
+    },
+    {
+      "layer": 14,
+      "head": 19,
+      "total_recovery": 0.011785496198917016,
+      "direct_recovery": 0.0001188212180586689,
+      "mediated_recovery": 0.011666674980858348,
+      "direct_share": null,
+      "classification": "INCONCLUSIVE"
+    },
+    {
+      "layer": 20,
+      "head": 2,
+      "total_recovery": 0.0023413631395652816,
+      "direct_recovery": 0.00014379330234250178,
+      "mediated_recovery": 0.0021975698372227797,
+      "direct_share": null,
+      "classification": "INCONCLUSIVE"
+    },
+    {
+      "layer": 18,
+      "head": 16,
+      "total_recovery": 0.0020437034664764647,
+      "direct_recovery": -0.00015866938923126547,
+      "mediated_recovery": 0.00220237285570773,
+      "direct_share": null,
+      "classification": "INCONCLUSIVE"
+    },
+    {
+      "layer": 6,
+      "head": 11,
+      "total_recovery": 0.0031925017445574386,
+      "direct_recovery": 0.00015812118773650806,
+      "mediated_recovery": 0.0030343805568209307,
+      "direct_share": null,
+      "classification": "INCONCLUSIVE"
+    },
+    {
+      "layer": 3,
+      "head": 27,
+      "total_recovery": -0.0021787373012820545,
+      "direct_recovery": 0.00010980800702437063,
+      "mediated_recovery": -0.002288545308306425,
+      "direct_share": null,
+      "classification": "INCONCLUSIVE"
+    },
+    {
+      "layer": 3,
+      "head": 5,
+      "total_recovery": 0.001030269660018359,
+      "direct_recovery": 1.1817875287472226e-05,
+      "mediated_recovery": 0.001018451784730887,
+      "direct_share": null,
+      "classification": "INCONCLUSIVE"
+    },
+    {
+      "layer": 5,
+      "head": 11,
+      "total_recovery": 0.0002777885235614487,
+      "direct_recovery": -7.120916571652701e-05,
+      "mediated_recovery": 0.0003489976892779757,
+      "direct_share": null,
+      "classification": "INCONCLUSIVE"
+    }
+  ],
+  "direct_thr": 0.5
+}

@@ -72,5 +72,6 @@
   "best_layer": 19,
   "best_emit_Pprime": 0.0,
   "verdict": "PRODUCT_NOT_AT_EQUALS",
-  "pair_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf"
+  "pair_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf",
+  "note": "Localizes where transplanting the donor's '=' residual emits the donor product (full-product metric). LATE_SWAP_WORKS => '=' site is causal there; PRODUCT_NOT_AT_EQUALS => product not localized to the '=' residual."
 }

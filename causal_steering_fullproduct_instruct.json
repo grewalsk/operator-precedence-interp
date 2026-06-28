@@ -49,5 +49,6 @@
     }
   },
   "verdict": "SITE_OR_METRIC_STILL_BROKEN",
-  "pair_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf"
+  "pair_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf",
+  "note": "Full-product metric (teacher-forced logprob + greedy-decode parse) \u2014 fixes the non-discriminative first-token metric that produced WO#5/5.1/5.1b's degenerate nulls."
 }
