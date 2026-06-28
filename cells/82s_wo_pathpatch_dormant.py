@@ -220,8 +220,8 @@ def _dorm_capture_eq(tag, bundle):
     def _eq_resid(cache, eq):
         rstack = torch.stack([cache[f"blocks.{L}.hook_resid_post"][0, eq] for L in range(nL)]).float()
         if _has_ln:
-            rstack = model.ln_final(rstack)
-        return rstack.detach().cpu().numpy().astype(np.float16)
+            rstack = model.ln_final(rstack)   # TL LayerNormPre re-casts output to cfg.dtype (bf16)
+        return rstack.detach().float().cpu().numpy().astype(np.float16)  # fp32 first: numpy has no bf16
 
     seen, rows, prod, ft = set(), [], [], []
     for (B, C) in dorm_pairs:
