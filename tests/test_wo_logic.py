@@ -1087,6 +1087,40 @@ def test_wo6_localization_verdict():
     check("threshold is tunable", lv(0.45, 0.0, 99, recover_thr=0.5)["label"] == "INCONCLUSIVE")
 
 
+def test_wrapper_blindspot():
+    bc = WO["wo_build_wrapper_conditions"]()
+    rend = {c[0]: c[2] for c in bc}
+    gt = {c[0]: c[3] for c in bc}
+    # 9 wrappers x 2 ops = 18 conditions; every gt is the no-op value B*C or B+C.
+    check("18 wrapper conditions", len(bc) == 18)
+    check("W_add0L_mul == C1 surface", rend["W_add0L_mul"](23, 47) == "( 0 + 23 ) * 47 =")
+    check("W_nest2_mul == D1 surface", rend["W_nest2_mul"](23, 47) == "( ( 0 + 23 ) ) * 47 =")
+    check("W_bare_mul == C0 surface", rend["W_bare_mul"](23, 47) == "23 * 47 =")
+    check("W_mul1R_add surface", rend["W_mul1R_add"](23, 47) == "( 23 * 1 ) + 47 =")
+    check("mul gt is B*C", gt["W_add0L_mul"](23, 47) == 1081 and gt["W_paren_mul"](23, 47) == 1081)
+    check("add gt is B+C", gt["W_add0L_add"](23, 47) == 70 and gt["W_bare_add"](23, 47) == 70)
+    # all surfaces end at '=' with no trailing space; renders are distinct.
+    check("all wrapper surfaces end at '='", all(rend[k](31, 22).endswith("=") and not rend[k](31, 22).endswith(" ") for k in rend))
+    check("all 18 surfaces distinct", len({rend[k](31, 22) for k in rend}) == 18)
+    v = WO["wo_wrapper_verdict"]
+    acc = {"W_bare_mul": 0.85, "W_bare_add": 0.97, "W_paren_mul": 0.82, "W_paren_add": 0.96,
+           "W_add0L_mul": 0.30, "W_add0R_mul": 0.33, "W_sub0_mul": 0.31,
+           "W_add0L_add": 0.95, "W_add0R_add": 0.96, "W_sub0_add": 0.95,
+           "W_mul1L_mul": 0.80, "W_mul1R_mul": 0.81, "W_mul1L_add": 0.96, "W_mul1R_add": 0.96,
+           "W_nest2_mul": 0.18, "W_nest3_mul": 0.07, "W_nest2_add": 0.95, "W_nest3_add": 0.94}
+    r = v(acc)
+    check("OP_MISMATCH: additive wrapper breaks mult", r["mult_blindspot"] and r["driver"] == "OP_MISMATCH")
+    check("OP_MISMATCH: operation-specific (add intact)", r["operation_specific"])
+    check("OP_MISMATCH: depth-sensitive (drop grows with nesting)", r["depth_sensitive"])
+    rp = dict(acc); rp["W_paren_mul"] = 0.30
+    check("PARENS driver when bare parens also break", v(rp)["driver"] == "PARENS")
+    rn = {k: (0.9 if k.endswith("mul") else 0.95) for k in acc}
+    check("NONE when no wrapper drops mult", v(rn)["driver"] == "NONE" and not v(rn)["mult_blindspot"])
+    # not operation-specific if additive wrappers break addition too.
+    rb = dict(acc); rb.update({"W_add0L_add": 0.30, "W_add0R_add": 0.33, "W_sub0_add": 0.31})
+    check("not operation-specific when add also breaks", not v(rb)["operation_specific"])
+
+
 def main():
     for fn in sorted(g for g in globals() if g.startswith("test_")):
         print(f"\n{fn}:")

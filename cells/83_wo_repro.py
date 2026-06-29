@@ -109,6 +109,9 @@ _deliverables = [
     # WORK ORDER #6 — path patching (A4) + dormant certification (B1/B2):
     "head_path_patch_base.json", "head_path_patch_instruct.json",
     "dormant_certification_base.json", "dormant_certification_instruct.json",
+    # WORK ORDER #7 — vacuous-wrapper blind-spot map (behavioral):
+    "wrapper_map_base.json", "wrapper_map_instruct.json",
+    "wrapper_map_summary.csv", "wrapper_map_heatmap.png",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:

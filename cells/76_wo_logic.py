@@ -2202,6 +2202,129 @@ def wo_localization_verdict(operand_pos_recovery, best_head_recovery, n_heads_fo
     return out
 
 
+# ============================================================================
+# 8g) WORK ORDER #7 — VACUOUS-WRAPPER BLIND-SPOT MAP (pure logic; behavioral).
+#     (Distinct from WO#6 operand-localization; this is a cheap behavioral map of
+#      WHICH semantically-null syntax breaks WHICH operation — the paper's hook.)
+# ----------------------------------------------------------------------------
+# The striking, under-exploited fact: '( 0 + B )' is the ADDITIVE IDENTITY — it
+# provably does not change B's value — yet it selectively breaks multiplication and
+# not addition. This maps identity-preserving rewrites W(B)==B crossed with the outer
+# operation (* C / + C) to pin down WHICH property triggers the blind spot:
+#   parens?  additive-identity?  inner-additive-under-outer-multiplicative mismatch?
+#   nesting depth?  Every surface's ground truth is just B*C (mul) or B+C (add),
+# because every wrapper is a no-op, so any accuracy drop is a pure syntactic artifact.
+# All forward-pass-FREE; the GPU cell is thin orchestration over wo_run_battery.
+# ----------------------------------------------------------------------------
+WO_WRAPPERS = [
+    ("bare",  "B",              lambda B: f"{B}"),
+    ("paren", "( B )",          lambda B: f"( {B} )"),
+    ("add0L", "( 0 + B )",      lambda B: f"( 0 + {B} )"),     # == C1's wrapper (additive identity)
+    ("add0R", "( B + 0 )",      lambda B: f"( {B} + 0 )"),
+    ("sub0",  "( B - 0 )",      lambda B: f"( {B} - 0 )"),
+    ("mul1L", "( 1 * B )",      lambda B: f"( 1 * {B} )"),     # multiplicative identity (inner '*')
+    ("mul1R", "( B * 1 )",      lambda B: f"( {B} * 1 )"),
+    ("nest2", "(( 0 + B ))",    lambda B: f"( ( 0 + {B} ) )"),  # == D1 (depth-2 additive identity)
+    ("nest3", "((( 0 + B )))",  lambda B: f"( ( ( 0 + {B} ) ) )"),
+]
+WO_WRAP_OPS = [("mul", "*", lambda B, C: int(B) * int(C)),
+               ("add", "+", lambda B, C: int(B) + int(C))]
+# property groups (for the driver classifier).
+WO_WRAP_ADDITIVE = ["add0L", "add0R", "sub0"]   # inner additive identity (inner '+'/'-')
+WO_WRAP_MULTID = ["mul1L", "mul1R"]             # inner multiplicative identity (inner '*')
+WO_WRAP_DEPTH = ["add0L", "nest2", "nest3"]     # additive identity at nesting depth 1/2/3
+
+
+def wo_build_wrapper_conditions():
+    """Identity-preserving wrappers W(B)==B crossed with outer op (* C / + C), as
+    (key, name, render, gt) tuples for wo_run_battery. gt is always B*C (mul) / B+C
+    (add) since every wrapper is a no-op. Surfaces reuse the exact battery spacing
+    (W_add0L_mul == C1, W_bare_mul == C0, W_nest2_mul == D1) so this ties back to the
+    main battery. Default-arg binding avoids the loop late-binding gotcha (§6)."""
+    conds = []
+    for wk, wname, wfn in WO_WRAPPERS:
+        for ok, osym, gt in WO_WRAP_OPS:
+            def render(B, C, wfn=wfn, osym=osym):
+                return f"{wfn(B)} {osym} {C} ="
+            def gtf(B, C, gt=gt):
+                return gt(B, C)
+            conds.append((f"W_{wk}_{ok}", f"{wname} {osym} C", render, gtf))
+    return conds
+
+
+def wo_wrapper_verdict(acc, break_thr=0.30, keep_thr=0.15):
+    """Classify the vacuous-wrapper blind spot from per-condition accuracy `acc`
+    (keys 'W_<wrapper>_<op>'). Pure decision logic. Returns a dict:
+        mult_blindspot   — additive-identity wrappers break MULT (mean drop >= break_thr)
+        operation_specific — those same wrappers do NOT break ADD (mean drop < keep_thr)
+        driver — what triggers it:
+            OP_MISMATCH          : inner-additive breaks mult BUT inner-multiplicative
+                                   (mul1*) and bare-parens do NOT -> the trigger is an
+                                   additive sub-expression under a multiplicative outer op
+            PARENS               : bare '( B ) * C' also breaks -> parentheses themselves
+            ADDITIVE_IDENTITY    : additive-identity breaks mult but the mismatch/parens
+                                   tests are ambiguous (e.g. mul1* also drops)
+            NONE                 : no mult blind spot
+        depth_sensitive — drop grows monotonically with nesting depth (add0L<nest2<nest3)
+    plus the per-wrapper drops and a human reason. Drops are vs the bare baseline of
+    the SAME operation, so 'drop' is the pure cost of the no-op wrapper."""
+    bm, ba = acc.get("W_bare_mul"), acc.get("W_bare_add")
+
+    def drop(w, op, base):
+        v = acc.get(f"W_{w}_{op}")
+        return None if (v is None or base is None) else float(base) - float(v)
+
+    dm = {w: drop(w, "mul", bm) for w in (WO_WRAP_ADDITIVE + WO_WRAP_MULTID + ["paren", "nest2", "nest3"])}
+    da = {w: drop(w, "add", ba) for w in (WO_WRAP_ADDITIVE + WO_WRAP_MULTID + ["paren", "nest2", "nest3"])}
+
+    def _mean(d, ws):
+        xs = [d[w] for w in ws if d.get(w) is not None]
+        return (sum(xs) / len(xs)) if xs else None
+
+    add_mul = _mean(dm, WO_WRAP_ADDITIVE)
+    mul_mul = _mean(dm, WO_WRAP_MULTID)
+    paren_mul = dm.get("paren")
+    add_add = _mean(da, WO_WRAP_ADDITIVE)
+
+    blind = add_mul is not None and add_mul >= break_thr
+    op_spec = bool(blind and add_add is not None and add_add < keep_thr)
+    if not blind:
+        driver = "NONE"
+    elif paren_mul is not None and paren_mul >= break_thr:
+        driver = "PARENS"
+    elif mul_mul is not None and mul_mul < keep_thr:
+        driver = "OP_MISMATCH"
+    else:
+        driver = "ADDITIVE_IDENTITY"
+    depth_ok = all(dm.get(w) is not None for w in WO_WRAP_DEPTH)
+    depth_sensitive = bool(depth_ok and dm["nest3"] >= dm["nest2"] - 1e-9 >= dm["add0L"] - 2e-9
+                           and dm["nest3"] > dm["add0L"] + keep_thr)
+
+    out = {"mult_blindspot": bool(blind), "operation_specific": op_spec, "driver": driver,
+           "depth_sensitive": depth_sensitive,
+           "drop_mul": {w: dm[w] for w in dm}, "drop_add": {w: da[w] for w in da},
+           "add_identity_mul_drop": add_mul, "mul_identity_mul_drop": mul_mul,
+           "paren_mul_drop": paren_mul, "add_identity_add_drop": add_add}
+    if driver == "OP_MISMATCH":
+        out["reason"] = (f"A semantically-null additive wrapper breaks MULTIPLICATION "
+                         f"(mean acc drop {_wo_fmt(add_mul)}) while a multiplicative-identity wrapper "
+                         f"({_wo_fmt(mul_mul)}) and bare parentheses ({_wo_fmt(paren_mul)}) do NOT, and the "
+                         f"SAME wrappers leave ADDITION intact ({_wo_fmt(add_add)}): the blind spot is an "
+                         "inner-additive / outer-multiplicative precedence-binding conflict, not parens or "
+                         "identity per se.")
+    elif driver == "PARENS":
+        out["reason"] = (f"Even bare parentheses '( B ) * C' break multiplication "
+                         f"(drop {_wo_fmt(paren_mul)}): parenthesization itself triggers the blind spot.")
+    elif driver == "ADDITIVE_IDENTITY":
+        out["reason"] = (f"Additive-identity wrappers break multiplication (drop {_wo_fmt(add_mul)}) but "
+                         f"the parens/mismatch contrasts are ambiguous (mul-identity drop {_wo_fmt(mul_mul)}).")
+    else:
+        out["reason"] = "No multiplicative blind spot: no vacuous wrapper drops mult accuracy past threshold."
+    if depth_sensitive:
+        out["reason"] += f" Depth-sensitive: drop grows with nesting (add0L {_wo_fmt(dm['add0L'])} -> nest3 {_wo_fmt(dm['nest3'])})."
+    return out
+
+
 # ----------------------------------------------------------------------------
 # 9) Inline self-test (runs on every notebook execution; CPU only, ~instant).
 #    Mirrors tests/test_wo_logic.py so a notebook run also fails loudly if the
@@ -2471,6 +2594,24 @@ def _wo_selftest():
     assert wo_localization_verdict(0.8, 0.2, None)["label"] == "DISTRIBUTED_NO_LOCUS"
     assert wo_localization_verdict(0.1, 0.9, 1)["label"] == "INCONCLUSIVE"
     assert wo_localization_verdict(0.8, 0.1, 4)["label"] == "LOCALIZED_OPERAND_ROUTE"   # sparse via n_heads
+
+    # WORK ORDER #7 — vacuous-wrapper conditions + blind-spot driver verdict.
+    _w7 = dict((c[0], (c[2], c[3])) for c in wo_build_wrapper_conditions())
+    assert _w7["W_add0L_mul"][0](23, 47) == "( 0 + 23 ) * 47 =" and _w7["W_add0L_mul"][1](23, 47) == 1081
+    assert _w7["W_bare_mul"][0](23, 47) == "23 * 47 =" and _w7["W_bare_add"][1](23, 47) == 70
+    assert _w7["W_nest2_mul"][0](23, 47) == "( ( 0 + 23 ) ) * 47 =" and _w7["W_mul1L_mul"][0](23, 47) == "( 1 * 23 ) * 47 ="
+    _w7acc = {"W_bare_mul": 0.85, "W_bare_add": 0.97, "W_paren_mul": 0.82, "W_paren_add": 0.96,
+              "W_add0L_mul": 0.30, "W_add0R_mul": 0.33, "W_sub0_mul": 0.31,
+              "W_add0L_add": 0.95, "W_add0R_add": 0.96, "W_sub0_add": 0.95,
+              "W_mul1L_mul": 0.80, "W_mul1R_mul": 0.81, "W_mul1L_add": 0.96, "W_mul1R_add": 0.96,
+              "W_nest2_mul": 0.18, "W_nest3_mul": 0.07, "W_nest2_add": 0.95, "W_nest3_add": 0.94}
+    _w7v = wo_wrapper_verdict(_w7acc)
+    assert _w7v["mult_blindspot"] and _w7v["operation_specific"] and _w7v["driver"] == "OP_MISMATCH" \
+        and _w7v["depth_sensitive"], _w7v
+    _w7p = dict(_w7acc); _w7p["W_paren_mul"] = 0.30
+    assert wo_wrapper_verdict(_w7p)["driver"] == "PARENS"
+    _w7n = {k: (0.9 if k.endswith("mul") else 0.95) for k in _w7acc}
+    assert wo_wrapper_verdict(_w7n)["driver"] == "NONE" and not wo_wrapper_verdict(_w7n)["mult_blindspot"]
     return True
 
 
