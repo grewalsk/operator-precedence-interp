@@ -1,0 +1,37 @@
+tag,wrapper,surface,op,acc,drop_vs_bare
+base,bare,B,mul,0.8375,0
+base,bare,B,add,1,0
+base,paren,( B ),mul,0.495,0.3425
+base,paren,( B ),add,0.9975,0.0025
+base,add0L,( 0 + B ),mul,0.5075,0.33
+base,add0L,( 0 + B ),add,0.9925,0.0075
+base,add0R,( B + 0 ),mul,0.8225,0.015
+base,add0R,( B + 0 ),add,1,0
+base,sub0,( B - 0 ),mul,0.7625,0.075
+base,sub0,( B - 0 ),add,1,0
+base,mul1L,( 1 * B ),mul,0.6025,0.235
+base,mul1L,( 1 * B ),add,0.99,0.01
+base,mul1R,( B * 1 ),mul,0.6875,0.15
+base,mul1R,( B * 1 ),add,0.98,0.02
+base,nest2,(( 0 + B )),mul,0.6475,0.19
+base,nest2,(( 0 + B )),add,0.835,0.165
+base,nest3,((( 0 + B ))),mul,0.615,0.2225
+base,nest3,((( 0 + B ))),add,0.665,0.335
+instruct,bare,B,mul,0.8475,0
+instruct,bare,B,add,0.9825,0
+instruct,paren,( B ),mul,0.755,0.0925
+instruct,paren,( B ),add,0.9975,-0.015
+instruct,add0L,( 0 + B ),mul,0.265,0.5825
+instruct,add0L,( 0 + B ),add,0.995,-0.0125
+instruct,add0R,( B + 0 ),mul,0.3375,0.51
+instruct,add0R,( B + 0 ),add,0.9825,0
+instruct,sub0,( B - 0 ),mul,0.1575,0.69
+instruct,sub0,( B - 0 ),add,0.79,0.1925
+instruct,mul1L,( 1 * B ),mul,0.58,0.2675
+instruct,mul1L,( 1 * B ),add,0.9825,0
+instruct,mul1R,( B * 1 ),mul,0.5125,0.335
+instruct,mul1R,( B * 1 ),add,0.9925,-0.01
+instruct,nest2,(( 0 + B )),mul,0.0375,0.81
+instruct,nest2,(( 0 + B )),add,0.2525,0.73
+instruct,nest3,((( 0 + B ))),mul,0.0125,0.835
+instruct,nest3,((( 0 + B ))),add,0.2325,0.75

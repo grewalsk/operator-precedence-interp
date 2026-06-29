@@ -18,7 +18,7 @@ models:
   llama32_3b_it: meta-llama/Llama-3.2-3B-Instruct  (revision=None)
 
 versions:
-  transformer_lens : 3.3.0
+  transformer_lens : 3.5.0
   torch            : 2.11.0+cu128
   transformers     : 5.12.0
   numpy            : 2.0.2
@@ -108,6 +108,10 @@ deliverables produced (ART/results):
   [x] head_path_patch_instruct.json
   [x] dormant_certification_base.json
   [x] dormant_certification_instruct.json
+  [x] wrapper_map_base.json
+  [x] wrapper_map_instruct.json
+  [x] wrapper_map_summary.csv
+  [x] wrapper_map_heatmap.png
 
 # Reproduce: open the notebook, set HF_TOKEN, Run All. All forward passes are
 # cached per (model-tag, condition) under ART; a fresh runtime resumes from disk.

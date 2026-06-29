@@ -1,0 +1,57 @@
+{
+  "tag": "instruct",
+  "experiment": "WO7_vacuous_wrapper_map",
+  "acc": {
+    "W_bare_mul": 0.8475,
+    "W_bare_add": 0.9825,
+    "W_paren_mul": 0.755,
+    "W_paren_add": 0.9975,
+    "W_add0L_mul": 0.265,
+    "W_add0L_add": 0.995,
+    "W_add0R_mul": 0.3375,
+    "W_add0R_add": 0.9825,
+    "W_sub0_mul": 0.1575,
+    "W_sub0_add": 0.79,
+    "W_mul1L_mul": 0.58,
+    "W_mul1L_add": 0.9825,
+    "W_mul1R_mul": 0.5125,
+    "W_mul1R_add": 0.9925,
+    "W_nest2_mul": 0.0375,
+    "W_nest2_add": 0.2525,
+    "W_nest3_mul": 0.0125,
+    "W_nest3_add": 0.2325
+  },
+  "verdict": {
+    "mult_blindspot": true,
+    "operation_specific": true,
+    "driver": "ADDITIVE_IDENTITY",
+    "depth_sensitive": true,
+    "drop_mul": {
+      "add0L": 0.5825,
+      "add0R": 0.51,
+      "sub0": 0.6900000000000001,
+      "mul1L": 0.26750000000000007,
+      "mul1R": 0.3350000000000001,
+      "paren": 0.09250000000000003,
+      "nest2": 0.81,
+      "nest3": 0.8350000000000001
+    },
+    "drop_add": {
+      "add0L": -0.012499999999999956,
+      "add0R": 0.0,
+      "sub0": 0.1925,
+      "mul1L": 0.0,
+      "mul1R": -0.010000000000000009,
+      "paren": -0.015000000000000013,
+      "nest2": 0.73,
+      "nest3": 0.75
+    },
+    "add_identity_mul_drop": 0.5941666666666667,
+    "mul_identity_mul_drop": 0.3012500000000001,
+    "paren_mul_drop": 0.09250000000000003,
+    "add_identity_add_drop": 0.06000000000000002,
+    "reason": "Additive-identity wrappers break multiplication (drop 0.594) but the parens/mismatch contrasts are ambiguous (mul-identity drop 0.301). Depth-sensitive: drop grows with nesting (add0L 0.583 -> nest3 0.835)."
+  },
+  "pairs_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf",
+  "note": "Identity-preserving wrappers W(B)==B x outer op (*C/+C); every gt is the no-op value, so any accuracy drop is a pure syntactic artifact of a semantically-null rewrite."
+}

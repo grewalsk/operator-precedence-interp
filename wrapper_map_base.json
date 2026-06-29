@@ -1,0 +1,57 @@
+{
+  "tag": "base",
+  "experiment": "WO7_vacuous_wrapper_map",
+  "acc": {
+    "W_bare_mul": 0.8375,
+    "W_bare_add": 1.0,
+    "W_paren_mul": 0.495,
+    "W_paren_add": 0.9975,
+    "W_add0L_mul": 0.5075,
+    "W_add0L_add": 0.9925,
+    "W_add0R_mul": 0.8225,
+    "W_add0R_add": 1.0,
+    "W_sub0_mul": 0.7625,
+    "W_sub0_add": 1.0,
+    "W_mul1L_mul": 0.6025,
+    "W_mul1L_add": 0.99,
+    "W_mul1R_mul": 0.6875,
+    "W_mul1R_add": 0.98,
+    "W_nest2_mul": 0.6475,
+    "W_nest2_add": 0.835,
+    "W_nest3_mul": 0.615,
+    "W_nest3_add": 0.665
+  },
+  "verdict": {
+    "mult_blindspot": false,
+    "operation_specific": false,
+    "driver": "NONE",
+    "depth_sensitive": false,
+    "drop_mul": {
+      "add0L": 0.33000000000000007,
+      "add0R": 0.015000000000000013,
+      "sub0": 0.07500000000000007,
+      "mul1L": 0.235,
+      "mul1R": 0.15000000000000002,
+      "paren": 0.3425,
+      "nest2": 0.19000000000000006,
+      "nest3": 0.22250000000000003
+    },
+    "drop_add": {
+      "add0L": 0.007499999999999951,
+      "add0R": 0.0,
+      "sub0": 0.0,
+      "mul1L": 0.010000000000000009,
+      "mul1R": 0.020000000000000018,
+      "paren": 0.0024999999999999467,
+      "nest2": 0.16500000000000004,
+      "nest3": 0.33499999999999996
+    },
+    "add_identity_mul_drop": 0.14000000000000004,
+    "mul_identity_mul_drop": 0.1925,
+    "paren_mul_drop": 0.3425,
+    "add_identity_add_drop": 0.0024999999999999836,
+    "reason": "No multiplicative blind spot: no vacuous wrapper drops mult accuracy past threshold."
+  },
+  "pairs_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf",
+  "note": "Identity-preserving wrappers W(B)==B x outer op (*C/+C); every gt is the no-op value, so any accuracy drop is a pure syntactic artifact of a semantically-null rewrite."
+}

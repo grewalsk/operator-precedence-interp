@@ -2,7 +2,7 @@
 
 - **Battery model:** `meta-llama/Llama-3.1-8B-Instruct` (tag `instruct`)
 - **Band:** (20, 49)  ·  **N:** 400  ·  **seed:** 0  ·  **format:** bare-continuation  ·  **prepend_bos:** True
-- **transformer_lens:** 3.3.0  ·  **model revision:** 0e9e39f249a16976918f6564b8830bc894c89659
+- **transformer_lens:** 3.5.0  ·  **model revision:** 0e9e39f249a16976918f6564b8830bc894c89659
 
 ## Selected branch
 
