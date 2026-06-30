@@ -1,0 +1,10 @@
+cond,name,acc,acc_ci_lo,acc_ci_hi,corr,parse_fail
+A1,add_compose_left,0.995,0.9820,0.9986,0.934929,0
+A2,add_compose_right,0.9275,0.8978,0.9490,0.73364,0
+D1,depth_redundant,0.0375,0.0229,0.0609,-0.00950346,0
+SELECTIVITY,add_compose_works(A1>=.80),True,,,,
+"MAGBIN[440,813)",C1 vs C4 @matched|B*C| (n=79),C1=0.532;C4=0.962,,,,
+"MAGBIN[813,1185)",C1 vs C4 @matched|B*C| (n=126),C1=0.278;C4=0.944,,,,
+"MAGBIN[1185,1558)",C1 vs C4 @matched|B*C| (n=104),C1=0.163;C4=0.885,,,,
+"MAGBIN[1558,1930)",C1 vs C4 @matched|B*C| (n=64),C1=0.188;C4=0.891,,,,
+"MAGBIN[1930,2303)",C1 vs C4 @matched|B*C| (n=27),C1=0.000;C4=0.704,,,,

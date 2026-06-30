@@ -1,0 +1,36 @@
+{
+  "band": [
+    20,
+    49
+  ],
+  "N": 400,
+  "seed": 0,
+  "pairs_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf",
+  "model_tag": "instruct",
+  "model_revision": "0e9e39f249a16976918f6564b8830bc894c89659",
+  "parse_rule": "wo_parse_int: first signed integer; strips commas; tolerates leading space / multi-token; parse-fail counts as incorrect",
+  "answer_extraction": "greedy decode K=WO_MAX_NEW_TOKENS; exact_acc = parsed == ground truth",
+  "transformer_lens": "3.5.0",
+  "torch": "2.11.0+cu128",
+  "transformers": "5.12.0",
+  "prepend_bos": true,
+  "using_fallback": false,
+  "model_registry": {
+    "base": "meta-llama/Llama-3.1-8B",
+    "instruct": "meta-llama/Llama-3.1-8B-Instruct",
+    "qwen25_7b_it": "Qwen/Qwen2.5-7B-Instruct",
+    "gemma2_9b_it": "google/gemma-2-9b-it",
+    "mistral_7b_it": "mistralai/Mistral-7B-Instruct-v0.3",
+    "llama32_1b_it": "meta-llama/Llama-3.2-1B-Instruct",
+    "llama32_3b_it": "meta-llama/Llama-3.2-3B-Instruct"
+  },
+  "ci_annotated_csvs": [
+    "base_2x2_ci.csv",
+    "boundary_map_ci.csv",
+    "branchb_controls_ci.csv",
+    "chat_format_control_ci.csv",
+    "cross_model_battery_ci.csv",
+    "instruct_battery_ci.csv",
+    "wrapper_map_summary_ci.csv"
+  ]
+}

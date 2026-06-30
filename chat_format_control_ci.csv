@@ -1,0 +1,5 @@
+tag,model,format,C0,C0_ci_lo,C0_ci_hi,C1,C1_ci_lo,C1_ci_hi,C4,C4_ci_lo,C4_ci_hi,C6,C6_ci_lo,C6_ci_hi,A1,A1_ci_lo,A1_ci_hi,D1,D1_ci_lo,D1_ci_hi,fs_C1_4,fs_C1_4_ci_lo,fs_C1_4_ci_hi,label
+instruct,meta-llama/Llama-3.1-8B-Instruct,chat-wrapped,0.775,0.7316,0.8132,0.3075,0.2643,0.3544,0.7,0.6534,0.7428,1,0.9905,1.0000,0.975,0.9546,0.9864,0.0725,0.0510,0.1022,0.3625,0.3169,0.4107,"OUT_OF_SCOPE (can't even do C4/C6 — capability, not composition)"
+llama32_3b_it,meta-llama/Llama-3.2-3B-Instruct,chat-wrapped,0.7725,0.7289,0.8109,0.64,0.5918,0.6855,0.74,0.6949,0.7806,1,0.9905,1.0000,0.655,0.6071,0.6999,0.4975,0.4488,0.5463,0.0975,0.0721,0.1305,"OUT_OF_SCOPE (can't even do C4/C6 — capability, not composition)"
+qwen25_7b_it,Qwen/Qwen2.5-7B-Instruct,chat-wrapped,0.7525,0.7079,0.7923,0.07,0.0489,0.0993,0.74,0.6949,0.7806,0.0275,0.0154,0.0486,0.64,0.5918,0.6855,0.0325,0.0191,0.0548,0.15,0.1183,0.1883,"OUT_OF_SCOPE (can't even do C4/C6 — capability, not composition)"
+gemma2_9b_it,google/gemma-2-9b-it,chat-wrapped,0.9925,0.9782,0.9974,0.9475,0.9211,0.9654,0.9875,0.9711,0.9946,1,0.9905,1.0000,1,0.9905,1.0000,0.8925,0.8583,0.9192,0.985,0.9677,0.9931,DOES_NOT_REPLICATE

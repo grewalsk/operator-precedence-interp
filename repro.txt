@@ -112,6 +112,13 @@ deliverables produced (ART/results):
   [x] wrapper_map_instruct.json
   [x] wrapper_map_summary.csv
   [x] wrapper_map_heatmap.png
+  [x] band_robustness_base.json
+  [x] band_robustness_instruct.json
+  [x] band_robustness_summary.csv
+  [x] run_meta.json
+  [x] wrapper_map_summary_ci.csv
+  [x] cross_model_battery_ci.csv
+  [ ] band_robustness_summary_ci.csv
 
 # Reproduce: open the notebook, set HF_TOKEN, Run All. All forward passes are
 # cached per (model-tag, condition) under ART; a fresh runtime resumes from disk.
