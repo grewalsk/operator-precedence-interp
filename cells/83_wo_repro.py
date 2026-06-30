@@ -112,6 +112,9 @@ _deliverables = [
     # WORK ORDER #7 — vacuous-wrapper blind-spot map (behavioral):
     "wrapper_map_base.json", "wrapper_map_instruct.json",
     "wrapper_map_summary.csv", "wrapper_map_heatmap.png",
+    # WORK ORDER #6 (Tier 1.1) — band-robustness panel for the OPERANDS_ONLY illusion:
+    "band_robustness_base.json", "band_robustness_instruct.json",
+    "band_robustness_summary.csv",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:

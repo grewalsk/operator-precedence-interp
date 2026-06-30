@@ -95,22 +95,26 @@ def _st_first_tok_id(value):
 #   every steering re-run read it; the model is only needed to (re)build it).
 # ----------------------------------------------------------------------------
 @torch.no_grad()
-def _st_capture(tag):
-    ck = f"wo_steer_resid_{tag}"
+def _st_capture(tag, pairs=None, ck=None):
+    # `pairs`/`ck` default to the band-(20,49) WO_STEER_PAIRS capture (backward-compatible);
+    # WO#6 band-robustness passes a second band's pairs + a distinct cache key.
+    pairs = WO_STEER_PAIRS if pairs is None else list(pairs)
+    _sha = wo_stim_hash(pairs)
+    ck = (f"wo_steer_resid_{tag}" if ck is None else ck)
     if has_artifact(ck, "pickle"):
         _b = load_pickle(ck)
-        if _b.get("pair_sha") == WO_STEER_PAIR_SHA:
-            log(f"WO#5 steering[{tag}]: residual capture cached — reused (CPU path).")
+        if _b.get("pair_sha") == _sha:
+            log(f"WO#5 steering[{tag}]: residual capture '{ck}' cached — reused (CPU path).")
             return _b
         log(f"WO#5 steering[{tag}]: cached capture pair_sha {str(_b.get('pair_sha'))[:12]} != "
-            f"current {WO_STEER_PAIR_SHA[:12]} — re-capturing (pairs changed).")
+            f"current {_sha[:12]} — re-capturing (pairs changed).")
 
     wo_load_model(tag)
     nL = model.cfg.n_layers
     items = []                                  # one record per usable pair (C1 ok AND C4 ok)
     n_skip_c1, n_skip_c4 = 0, 0
     c4_argmax_hits, c4_seen = 0, 0
-    for (B, C) in WO_STEER_PAIRS:
+    for (B, C) in pairs:
         p1 = _st_renderC1(B, C)
         assert p1.endswith("=") and not p1.endswith(" ")            # Hazard #2 (Llama tok).
         tok1 = model.to_tokens(p1)
@@ -162,7 +166,7 @@ def _st_capture(tag):
         "tag": tag, "n_layers": nL, "n_used": len(items),
         "n_skipped_c1": n_skip_c1, "n_skipped_c4": n_skip_c4,
         "c4_firsttok_argmax_match_rate": (c4_argmax_hits / c4_seen) if c4_seen else None,
-        "pair_sha": WO_STEER_PAIR_SHA, "items": items,
+        "pair_sha": _sha, "items": items,
     }
     save_pickle(ck, bundle)
     log(f"WO#5 steering[{tag}]: captured {len(items)} usable items "
