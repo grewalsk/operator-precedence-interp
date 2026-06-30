@@ -20,7 +20,7 @@ models:
 versions:
   transformer_lens : 3.5.0
   torch            : 2.11.0+cu128
-  transformers     : 5.12.0
+  transformers     : 5.12.1
   numpy            : 2.0.2
   python           : 3.12.13
   using_fallback   : False
@@ -115,6 +115,15 @@ deliverables produced (ART/results):
   [x] band_robustness_base.json
   [x] band_robustness_instruct.json
   [x] band_robustness_summary.csv
+  [x] prereg_gap_base.json
+  [x] prereg_gap_instruct.json
+  [x] prereg_gap_summary.csv
+  [x] dose_response_base.json
+  [x] dose_response_instruct.json
+  [x] dose_response_summary.csv
+  [x] causal_share_base.json
+  [x] causal_share_instruct.json
+  [x] causal_share_summary.csv
   [x] run_meta.json
   [x] wrapper_map_summary_ci.csv
   [x] cross_model_battery_ci.csv

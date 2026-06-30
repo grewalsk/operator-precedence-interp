@@ -1,0 +1,204 @@
+{
+  "tag": "base",
+  "experiment": "WO6_T1.2_dose_response",
+  "reused_capture": true,
+  "k_grid": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "instrument_layer": 23,
+  "reg_c4_layer": 4,
+  "candidate_layers": [
+    4,
+    19,
+    23,
+    26,
+    31
+  ],
+  "ref_site": "C4_equals",
+  "claim_site": "C1_equals",
+  "ref_dose": {
+    "k1": {
+      "surface": "C4",
+      "layer": 23,
+      "k": 1,
+      "mean_delta": 0.08324945942149498,
+      "ci": [
+        0.0643919319845736,
+        0.103020969574427
+      ],
+      "emit_Pprime_rate": 0.0,
+      "n": 200,
+      "gen_n": 40
+    },
+    "k2": {
+      "surface": "C4",
+      "layer": 23,
+      "k": 2,
+      "mean_delta": 0.152678904083441,
+      "ci": [
+        0.12112553785693309,
+        0.18578183708486903
+      ],
+      "emit_Pprime_rate": 0.0,
+      "n": 200,
+      "gen_n": 40
+    },
+    "k4": {
+      "surface": "C4",
+      "layer": 23,
+      "k": 4,
+      "mean_delta": 0.2909273286839016,
+      "ci": [
+        0.23931652851754917,
+        0.3437479371665977
+      ],
+      "emit_Pprime_rate": 0.0,
+      "n": 200,
+      "gen_n": 40
+    },
+    "k8": {
+      "surface": "C4",
+      "layer": 23,
+      "k": 8,
+      "mean_delta": 0.4642168060259428,
+      "ci": [
+        0.38985270514988224,
+        0.5464369910054082
+      ],
+      "emit_Pprime_rate": 0.0,
+      "n": 200,
+      "gen_n": 40
+    }
+  },
+  "claim_dose": {
+    "k1": {
+      "surface": "C1",
+      "layer": 23,
+      "k": 1,
+      "mean_delta": -0.010617885116371326,
+      "ci": [
+        -0.02128974369597563,
+        0.0007095035619859088
+      ],
+      "emit_Pprime_rate": 0.0,
+      "n": 200,
+      "gen_n": 40
+    },
+    "k2": {
+      "surface": "C1",
+      "layer": 23,
+      "k": 2,
+      "mean_delta": -0.0006385455233976245,
+      "ci": [
+        -0.017364704386447556,
+        0.014561888042808226
+      ],
+      "emit_Pprime_rate": 0.0,
+      "n": 200,
+      "gen_n": 40
+    },
+    "k4": {
+      "surface": "C1",
+      "layer": 23,
+      "k": 4,
+      "mean_delta": 0.004139384760055691,
+      "ci": [
+        -0.022006182439246912,
+        0.029291046488768145
+      ],
+      "emit_Pprime_rate": 0.0,
+      "n": 200,
+      "gen_n": 40
+    },
+    "k8": {
+      "surface": "C1",
+      "layer": 23,
+      "k": 8,
+      "mean_delta": 0.040875157690024935,
+      "ci": [
+        -0.003723497077677166,
+        0.08254274607801924
+      ],
+      "emit_Pprime_rate": 0.0,
+      "n": 200,
+      "gen_n": 40
+    }
+  },
+  "verdict": {
+    "k_grid": [
+      1,
+      2,
+      4,
+      8
+    ],
+    "ref_monotone": true,
+    "ref_has_range": false,
+    "claim_flat": true,
+    "ref_top_delta": 0.4642168060259428,
+    "claim_moves_at_k": [],
+    "recover_thr": 0.5,
+    "null_tol": 0.25,
+    "min_rise": 0.1,
+    "table": [
+      {
+        "k": 1,
+        "ref_delta": 0.08324945942149498,
+        "ref_ci": [
+          0.0643919319845736,
+          0.103020969574427
+        ],
+        "claim_delta": -0.010617885116371326,
+        "claim_ci": [
+          -0.02128974369597563,
+          0.0007095035619859088
+        ]
+      },
+      {
+        "k": 2,
+        "ref_delta": 0.152678904083441,
+        "ref_ci": [
+          0.12112553785693309,
+          0.18578183708486903
+        ],
+        "claim_delta": -0.0006385455233976245,
+        "claim_ci": [
+          -0.017364704386447556,
+          0.014561888042808226
+        ]
+      },
+      {
+        "k": 4,
+        "ref_delta": 0.2909273286839016,
+        "ref_ci": [
+          0.23931652851754917,
+          0.3437479371665977
+        ],
+        "claim_delta": 0.004139384760055691,
+        "claim_ci": [
+          -0.022006182439246912,
+          0.029291046488768145
+        ]
+      },
+      {
+        "k": 8,
+        "ref_delta": 0.4642168060259428,
+        "ref_ci": [
+          0.38985270514988224,
+          0.5464369910054082
+        ],
+        "claim_delta": 0.040875157690024935,
+        "claim_ci": [
+          -0.003723497077677166,
+          0.08254274607801924
+        ]
+      }
+    ],
+    "label": "WEAK_INSTRUMENT",
+    "reason": "C1 is flat at every dose, but the REFERENCE site also fails to move (top-dose \u0394=0.464, crosses 0.5=False, top CI lo=0.390): there is NO dynamic range on this inject axis, so the C1 null is a possible DEAD INSTRUMENT and is uninterpretable from this control alone \u2014 the positive control must come from a site/route that does move (e.g. the operand path)."
+  },
+  "pair_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf",
+  "note": "Inject dose-response positive control for the C1 '=' causal null. Full-product metric \u0394(P'-true) with a CORRECT within-surface paired baseline. DEAD_DIRECTION_CONFIRMED needs the C4 reference to move monotonically with dose; WEAK_INSTRUMENT (no range anywhere) means the answer-site axis is inert even where the model succeeds (Stolfo re-derivation) and the positive control must come from the operand route. The CI is the result."
+}

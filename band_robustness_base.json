@@ -12,7 +12,53 @@
   "n_used": 400,
   "acc_C0_band2": 0.6775,
   "acc_C4_band2": 0.71,
-  "in_scope": true,
+  "parts_floor": 0.8,
+  "in_scope_strict": false,
+  "parts_note": "band2 (2,99) is a HARDER regime: C0/C4 drop ~15-20pts vs (20,49) and sit BELOW the 0.8 parts floor. The probe doesn't strictly require behavioral competence (residuals can encode B,C even when the output is wrong), but the 'model does the parts' premise is weaker here \u2014 report as a harder regime where operand-domination still holds, not as comfortably in-scope.",
+  "gap_ci": {
+    "C1_equals": {
+      "gap_mean": 0.06779837560773314,
+      "gap_ci": [
+        0.05132433524237903,
+        0.08635099674288711
+      ],
+      "gap_excludes_zero": true,
+      "r2_real_ci": [
+        0.9192527799171792,
+        0.9416265411823531
+      ],
+      "r2_base_ci": [
+        0.8431953270269078,
+        0.8833580510801131
+      ],
+      "n_boot_used": 300
+    },
+    "C4_equals": {
+      "gap_mean": 0.09409383703748041,
+      "gap_ci": [
+        0.07745257465941399,
+        0.11275218806379671
+      ],
+      "gap_excludes_zero": true,
+      "r2_real_ci": [
+        0.9510872583483034,
+        0.9638572325128416
+      ],
+      "r2_base_ci": [
+        0.8431953270269078,
+        0.8833580510801131
+      ],
+      "n_boot_used": 300
+    }
+  },
+  "c4_minus_c1_diff_ci": {
+    "C4_minus_C1_gap_mean": 0.02629546142974728,
+    "ci": [
+      0.01969830555550939,
+      0.03366952313082351
+    ],
+    "excludes_zero": true
+  },
   "headline_C1_equals_product": {
     "tag": "base",
     "band": "(2, 99)",
@@ -27,7 +73,12 @@
     "selectivity": 0.955207697395029,
     "baseline_gap": 0.05721603771652761,
     "headroom_above_baseline": 0.13516776503824768,
-    "verdict": "OPERANDS_ONLY"
+    "verdict": "OPERANDS_ONLY",
+    "gap_ci": [
+      0.05132433524237903,
+      0.08635099674288711
+    ],
+    "gap_excludes_zero": true
   },
   "rows": [
     {
@@ -44,7 +95,12 @@
       "selectivity": 0.955207697395029,
       "baseline_gap": 0.05721603771652761,
       "headroom_above_baseline": 0.13516776503824768,
-      "verdict": "OPERANDS_ONLY"
+      "verdict": "OPERANDS_ONLY",
+      "gap_ci": [
+        0.05132433524237903,
+        0.08635099674288711
+      ],
+      "gap_excludes_zero": true
     },
     {
       "tag": "base",
@@ -124,11 +180,17 @@
       "selectivity": 0.9746008514680745,
       "baseline_gap": 0.08825385807262454,
       "headroom_above_baseline": 0.13516776503824768,
-      "verdict": "OPERANDS_ONLY"
+      "verdict": "OPERANDS_ONLY",
+      "gap_ci": [
+        0.07745257465941399,
+        0.11275218806379671
+      ],
+      "gap_excludes_zero": true
     }
   ],
   "ridge": 1.0,
   "folds": 5,
   "seed": 919,
-  "note": "Band-robustness panel for the OPERANDS_ONLY illusion. band2 linear-(B,C) ceiling \u22480.85 (vs \u22480.97 at (20,49)) -> \u22480.15 headroom. OPERANDS_ONLY with headroom available = band-robust illusion; REPRESENTED = band-specific (narrow the claim). The linear-(B,C) baseline is recomputed fresh at band2 from the actual operands."
+  "gap_nboot": 300,
+  "note": "Band-robustness panel. band2 linear-(B,C) ceiling \u22480.85 (vs \u22480.97 at (20,49)) -> \u22480.15 headroom. The DECISION is the gap CI (gap=R2_real-baseline): brackets 0 -> operand-explained (no detectable product even with headroom); excludes 0 -> a small REAL product component (then the claim shifts from 'not represented' to 'weakly represented but causally dormant', leaning on the causal null). The fixed 0.10 'verdict' margin is a heuristic, NOT the test."
 }

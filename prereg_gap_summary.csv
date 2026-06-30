@@ -1,0 +1,3 @@
+tag,prereg_layer,c1_argmax_layer,c1_gap_at_prereg,ci_lo,ci_hi,excludes_zero,verdict
+base,5,7,0.0546002,0.039765,0.0718171,True,PREREG_GAP_EXCLUDES_ZERO
+instruct,6,7,0.059355,0.0437562,0.077855,True,PREREG_GAP_EXCLUDES_ZERO

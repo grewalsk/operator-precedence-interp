@@ -1,0 +1,94 @@
+{
+  "tag": "instruct",
+  "band2": [
+    2,
+    99
+  ],
+  "primary_band": [
+    20,
+    49
+  ],
+  "pairs_sha": "3357af098fa7a044f8e5fdb5f6e0c789855e483c",
+  "n_used": 400,
+  "prereg_layer": 6,
+  "c1_argmax_layer": 7,
+  "prereg_criterion": "argmax C4 '=' B*C CV-R^2 (working surface, C1-independent)",
+  "c4_peak_r2": 0.9487327115844421,
+  "c1_gap_at_prereg": {
+    "gap_mean": 0.05935501990009193,
+    "gap_ci": [
+      0.04375623215175449,
+      0.07785503251833509
+    ],
+    "gap_excludes_zero": true,
+    "r2_real_ci": [
+      0.9101279405133358,
+      0.9355048406678055
+    ],
+    "r2_base_ci": [
+      0.8431953270269078,
+      0.8833580510801131
+    ],
+    "n_boot_used": 300
+  },
+  "c4_gap_at_prereg": {
+    "gap_mean": 0.0901619825771692,
+    "gap_ci": [
+      0.07433556620229581,
+      0.10942489058775778
+    ],
+    "gap_excludes_zero": true,
+    "r2_real_ci": [
+      0.9465762716547413,
+      0.9613318718244452
+    ],
+    "r2_base_ci": [
+      0.8431953270269078,
+      0.8833580510801131
+    ],
+    "n_boot_used": 300
+  },
+  "c1_gap_at_c1_argmax": {
+    "gap_mean": 0.06024549645240846,
+    "gap_ci": [
+      0.04336426179496106,
+      0.07920297140791671
+    ],
+    "gap_excludes_zero": true,
+    "r2_real_ci": [
+      0.9120758850724618,
+      0.9366243129652062
+    ],
+    "r2_base_ci": [
+      0.8431953270269078,
+      0.8833580510801131
+    ],
+    "n_boot_used": 300
+  },
+  "verdict": {
+    "prereg_layer": 6,
+    "c1_argmax_layer": 7,
+    "moved_off_c1_argmax": true,
+    "c1_gap_mean": 0.05935501990009193,
+    "c1_gap_ci": [
+      0.04375623215175449,
+      0.07785503251833509
+    ],
+    "c1_excludes_zero": true,
+    "c4_gap_mean": 0.0901619825771692,
+    "c4_gap_ci": [
+      0.07433556620229581,
+      0.10942489058775778
+    ],
+    "c4_excludes_zero": true,
+    "c1_argmax_excludes_zero": true,
+    "robust_to_layer_choice": true,
+    "label": "PREREG_GAP_EXCLUDES_ZERO",
+    "reason": "at the PRE-REGISTERED layer L*=6 (the C4 decodability peak, chosen independently of C1; C1's own argmax was L=7), the C1 '=' product gap = 0.059 with 95%CI=[0.044,0.078] still EXCLUDES 0 -> the small product component is not a layer-selection artifact."
+  },
+  "gap_nboot": 300,
+  "seed": 919,
+  "ridge": 1.0,
+  "folds": 5,
+  "note": "Pre-registered-layer gap check: the evaluation layer is FIXED at the C4 '=' B*C decodability peak (independent of C1), then the C1 '=' product gap CI is read there. Kills the 'you read C1 at its own argmax layer' objection to the 82u band2 gap CI. Decision = the gap CI (excludes vs brackets 0), not a fixed margin."
+}
