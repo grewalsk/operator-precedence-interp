@@ -223,7 +223,7 @@ def _dorm_capture_eq(tag, bundle):
             rstack = model.ln_final(rstack)   # TL LayerNormPre re-casts output to cfg.dtype (bf16)
         return rstack.detach().float().cpu().numpy().astype(np.float16)  # fp32 first: numpy has no bf16
 
-    seen, rows, prod, ft = set(), [], [], []
+    seen, rows, prod, ft, alltok = set(), [], [], [], set()
     for (B, C) in dorm_pairs:
         if (B, C) in seen:
             continue
@@ -238,19 +238,31 @@ def _dorm_capture_eq(tag, bundle):
         _, cache = model.run_with_cache(tokt, names_filter=lambda n: n.endswith("hook_resid_post"))
         rows.append(_eq_resid(cache, loc["equals"]))
         prod.append(int(B * C))
-        ft.append(int(tokenizer(" " + str(int(B * C)), add_special_tokens=False)["input_ids"][0]))
-    # answer-token unembedding columns (the logit-affecting readout basis).
+        ans_ids = list(tokenizer(" " + str(int(B * C)), add_special_tokens=False)["input_ids"])
+        ft.append(int(ans_ids[0]))                     # first token (diagnostic only — often SHARED)
+        alltok.update(int(t) for t in ans_ids)         # ALL answer tokens -> the readout basis
+    # answer-token unembedding columns (the logit-affecting readout basis). The readout basis
+    # is built from EVERY answer-string token, not just the first: Llama chunks the leading
+    # digits so the FIRST answer token is shared across products (first_tok_shared~1.0). A
+    # first-token-only basis collapses to rank ~0 after centering (-> the all-null
+    # certification we saw); the full answer-token set spans the discriminating directions.
     W_U = model.W_U.detach().float().cpu().numpy()          # [d_model, d_vocab]
-    uniq = sorted(set(ft))
+    uniq_first = sorted(set(ft))
+    uniq = sorted(alltok)
     cols = np.stack([W_U[:, t] for t in uniq], axis=1)      # [d_model, r]
     cols = cols - cols.mean(axis=1, keepdims=True)          # center: only logit DIFFERENCES matter
+    basis_rank = int(np.linalg.matrix_rank(cols)) if cols.shape[1] > 0 else 0
     bundle_eq = {"tag": tag, "n_layers": nL, "dorm_sha": dorm_sha,
                  "resid_eq": np.stack(rows) if rows else np.zeros((0, nL, model.cfg.d_model), np.float16),
                  "product": prod, "first_tok": ft, "readout_basis": cols.astype(np.float32),
-                 "readout_space": readout_space, "n_unique_answer_tokens": len(uniq)}
+                 "readout_space": readout_space, "n_unique_answer_tokens": len(uniq),
+                 "n_unique_first_tokens": len(uniq_first), "basis_source": "all_answer_tokens",
+                 "readout_basis_rank": basis_rank}
     save_pickle(ck, bundle_eq)
     log(f"WO#6 dorm[{tag}]: captured '=' residual ({readout_space}) for {len(rows)} unique (B,C); "
-        f"readout basis r={cols.shape[1]} answer tokens.")
+        f"readout basis r={cols.shape[1]} answer tokens (rank {basis_rank}; "
+        f"{len(uniq_first)} distinct FIRST tokens — first-token-only basis would be rank ~"
+        f"{max(0, len(uniq_first) - 1)}).")
     return bundle_eq
 
 

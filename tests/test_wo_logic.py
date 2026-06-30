@@ -1191,6 +1191,100 @@ def test_gap_bootstrap_decides_representation():
     check("wo_gap_bootstrap degenerate -> None", gb(np.zeros((4, 96)), B[:4], C[:4], n_boot=10) is None)
 
 
+# ---------------------------------------- WO#6 Tier 1.2/1.3 (pre-reg / dose / causal) ----
+def test_prereg_layer_selection():
+    pl = WO["wo_prereg_layer"]
+    check("argmax layer", pl({0: 0.1, 1: 0.9, 2: 0.5}) == 1)
+    check("ties -> lowest layer", pl({0: 0.9, 1: 0.9, 2: 0.3}) == 0)
+    check("None entries skipped", pl({0: None, 3: 0.4, 5: None}) == 3)
+    check("all-None -> None", pl({0: None, 1: None}) is None)
+    check("empty -> None", pl({}) is None)
+
+
+def test_prereg_gap_verdict():
+    pv = WO["wo_prereg_gap_verdict"]
+    exc = {"gap_mean": 0.07, "gap_ci": [0.02, 0.12], "gap_excludes_zero": True}
+    brk = {"gap_mean": 0.03, "gap_ci": [-0.02, 0.08], "gap_excludes_zero": False}
+    # C1 gap excludes 0 at the pre-registered (C4-peak) layer -> objection killed.
+    v = pv(prereg_layer=7, c1_argmax_layer=4, c1_gap=exc, c4_gap=exc, c1_argmax_gap=exc)
+    check("prereg excludes-zero label", v["label"] == "PREREG_GAP_EXCLUDES_ZERO")
+    check("prereg records the fixed layer", v["prereg_layer"] == 7)
+    check("prereg flags moved-off-argmax", v["moved_off_c1_argmax"] is True)
+    check("prereg robust across both layer choices", v["robust_to_layer_choice"] is True)
+    # C1 gap brackets 0 at the pre-registered layer -> it was a layer-selection artifact.
+    v2 = pv(prereg_layer=7, c1_argmax_layer=4, c1_gap=brk)
+    check("prereg brackets-zero label", v2["label"] == "PREREG_GAP_BRACKETS_ZERO")
+    check("prereg brackets-zero excludes_zero False", v2["c1_excludes_zero"] is False)
+    # no gap available -> inconclusive (not a silent pass).
+    v3 = pv(prereg_layer=7, c1_argmax_layer=4, c1_gap=None)
+    check("prereg no-CI -> INCONCLUSIVE", v3["label"] == "INCONCLUSIVE")
+    # same layer chosen -> not moved off argmax.
+    v4 = pv(prereg_layer=4, c1_argmax_layer=4, c1_gap=exc)
+    check("prereg same-layer -> moved_off False", v4["moved_off_c1_argmax"] is False)
+
+
+def test_dose_response_verdict():
+    dv = WO["wo_dose_response_verdict"]
+    K = [1, 2, 4, 8]
+    mono_ci = [[0.2, 0.6], [0.5, 1.1], [1.2, 2.0], [2.5, 3.9]]   # all > 0, rising
+    mono = [0.4, 0.8, 1.6, 3.2]
+    flat = [0.0, 0.05, -0.03, 0.02]
+    flat_ci = [[-0.2, 0.2], [-0.18, 0.25], [-0.2, 0.18], [-0.21, 0.22]]
+    # reference moves monotonically + has range; claim flat -> DEAD DIRECTION confirmed.
+    v = dv(K, mono, mono_ci, flat, flat_ci)
+    check("dose: DEAD_DIRECTION_CONFIRMED", v["label"] == "DEAD_DIRECTION_CONFIRMED")
+    check("dose: ref flagged monotone", v["ref_monotone"] is True)
+    check("dose: ref flagged has-range", v["ref_has_range"] is True)
+    check("dose: claim flagged flat", v["claim_flat"] is True)
+    # reference ALSO flat (no dynamic range anywhere) -> WEAK_INSTRUMENT (committed reality).
+    v2 = dv(K, flat, flat_ci, flat, flat_ci)
+    check("dose: no range -> WEAK_INSTRUMENT", v2["label"] == "WEAK_INSTRUMENT")
+    check("dose: ref_has_range False", v2["ref_has_range"] is False)
+    # claim itself moves with a CI off 0 -> DIRECTION_IS_CAUSAL (refutes dormancy).
+    moved = [0.0, 0.1, 0.7, 1.5]
+    moved_ci = [[-0.2, 0.2], [-0.1, 0.3], [0.4, 1.0], [1.0, 2.0]]
+    v3 = dv(K, mono, mono_ci, moved, moved_ci)
+    check("dose: claim moves -> DIRECTION_IS_CAUSAL", v3["label"] == "DIRECTION_IS_CAUSAL")
+    check("dose: records the k where claim moves", 4 in v3["claim_moves_at_k"])
+    # ref has range but NOT monotone (non-increasing dip) -> INCONCLUSIVE.
+    nonmono = [3.0, 0.4, 0.5, 3.2]
+    nonmono_ci = [[2.0, 4.0], [0.1, 0.7], [0.2, 0.8], [2.5, 3.9]]
+    v4 = dv(K, nonmono, nonmono_ci, flat, flat_ci)
+    check("dose: range w/o clean monotone -> INCONCLUSIVE", v4["label"] == "INCONCLUSIVE")
+    check("dose: table parallels k_grid", [r["k"] for r in v["table"]] == K)
+
+
+def test_direction_split_and_causal_share():
+    import numpy as np
+    ds = WO["wo_direction_split"]; cs = WO["wo_causal_share_verdict"]
+    # delta entirely along w -> w_frac == 1, perp ~ 0.
+    w = np.array([0.0, 3.0, 0.0, 4.0])           # ||w|| = 5
+    d_along = np.array([0.0, 6.0, 0.0, 8.0])      # 2*w
+    s = ds(d_along, w)
+    check("split: along-w -> w_frac ~ 1", abs(s["w_frac"] - 1.0) < 1e-9)
+    check("split: along-w -> perp ~ 0", float(np.linalg.norm(s["perp"])) < 1e-9)
+    # delta orthogonal to w -> w_frac ~ 0.
+    d_perp = np.array([5.0, 0.0, 7.0, 0.0])       # zero dot with w (w has 0 in those coords... check)
+    s2 = ds(d_perp, w)
+    check("split: orthogonal -> w_frac ~ 0", s2["w_frac"] < 1e-9)
+    check("split: zero delta -> None", ds(np.zeros(4), w) is None)
+    check("split: zero w -> None", ds(d_along, np.zeros(4)) is None)
+    # causal share: full swap inert -> NO_CAUSAL_HANDLE (the committed reality).
+    v_none = cs(effect_full=0.0, effect_perp=0.0, effect_wonly=0.0, effect_floor=0.5)
+    check("share: inert swap -> NO_CAUSAL_HANDLE", v_none["label"] == "NO_CAUSAL_HANDLE")
+    # full swap moves, w-hat carries ~none, effect survives w ablation -> dormant DIRECTION.
+    v_dorm = cs(effect_full=1.0, effect_perp=0.95, effect_wonly=0.05, effect_floor=0.5)
+    check("share: dormant direction certified", v_dorm["label"] == "DORMANT_DIRECTION_CERTIFIED")
+    check("share: w_share computed", abs(v_dorm["w_share"] - 0.05) < 1e-9)
+    # w-hat carries most of the effect -> logit-coupled.
+    v_coup = cs(effect_full=1.0, effect_perp=0.1, effect_wonly=0.9, effect_floor=0.5)
+    check("share: coupled direction", v_coup["label"] == "DIRECTION_CARRIES_EFFECT")
+    # split across both -> inconclusive.
+    v_mix = cs(effect_full=1.0, effect_perp=0.6, effect_wonly=0.4, effect_floor=0.5)
+    check("share: mixed -> INCONCLUSIVE", v_mix["label"] == "INCONCLUSIVE")
+    check("share: undefined effect -> INCONCLUSIVE", cs(None, 0.1, 0.1)["label"] == "INCONCLUSIVE")
+
+
 def main():
     for fn in sorted(g for g in globals() if g.startswith("test_")):
         print(f"\n{fn}:")

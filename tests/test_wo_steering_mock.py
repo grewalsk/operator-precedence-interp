@@ -290,13 +290,34 @@ def _run(pairs):
         # WO#5.1c full-product metric (82p) — teacher-forced logprob + greedy decode.
         _exec_cell(ns, "82p_wo_steering_fullproduct.py")
         fp = ns["WO_STEER_FP"]["base"]
+        # WO#6 Tier 1.2 pre-registered-layer gap (82w) — reuses a band2 capture (mock pairs
+        # stand in for band2 since the mock vocab only covers them) + cell-76 prereg helpers.
+        ns["WO_PAIRS_B2"] = pairs
+        ns["CFG"]["wo_band2"] = (20, 49)
+        ns["CFG"]["wo_pg_gap_nboot"] = 60
+        _exec_cell(ns, "82w_wo_prereg_gap.py")
+        pg = ns["WO_PREREG_GAP"].get("base")
+        pgcsv = os.path.exists(os.path.join(art, "results", "prereg_gap_summary.csv"))
+        # WO#6 Tier 1.2 inject dose-response (82x) — reuses the WO#5 capture + 82p metrics.
+        ns["CFG"]["wo_dr_gen_sample"] = 12
+        ns["CFG"]["wo_dr_gen_k"] = 3
+        _exec_cell(ns, "82x_wo_dose_response.py")
+        dr = ns["WO_DOSE"]["base"]
+        drcsv = os.path.exists(os.path.join(art, "results", "dose_response_summary.csv"))
+        # WO#6 Tier 1.3 causal-share dormant certification (82y) — swap-delta apportionment.
+        ns["CFG"]["wo_cs_gen_sample"] = 12
+        ns["CFG"]["wo_cs_gen_k"] = 3
+        _exec_cell(ns, "82y_wo_causal_share.py")
+        cs = ns["WO_CAUSAL_SHARE"]["base"]
+        cscsv = os.path.exists(os.path.join(art, "results", "causal_share_summary.csv"))
         # capture artifact really exists on disk (the CPU path Exp B depends on).
         cap = os.path.exists(os.path.join(art, "wo_steer_resid_base.pkl"))
         csv = os.path.exists(os.path.join(art, "results", "causal_steering_summary.csv"))
         calcsv = os.path.exists(os.path.join(art, "results", "causal_steering_calibration_summary.csv"))
         rocsv = os.path.exists(os.path.join(art, "results", "causal_steering_remetric_summary.csv"))
         fpcsv = os.path.exists(os.path.join(art, "results", "causal_steering_fullproduct_summary.csv"))
-        return out, out2, selrows, cap, csv, cal, calcsv, remet, rocsv, fp, fpcsv
+        return (out, out2, selrows, cap, csv, cal, calcsv, remet, rocsv, fp, fpcsv,
+                pg, pgcsv, dr, drcsv, cs, cscsv)
     finally:
         shutil.rmtree(art, ignore_errors=True)
 
@@ -311,7 +332,8 @@ def main():
             seen.add((B, C)); pairs.append((B, C))
 
     print("\n[mock end-to-end]  expect CLEAN_NULL on C1, with the C4 reference DETECTING signal")
-    out, out2, selrows, cap, csv, cal, calcsv, remet, rocsv, fp, fpcsv = _run(pairs)
+    (out, out2, selrows, cap, csv, cal, calcsv, remet, rocsv, fp, fpcsv,
+     pg, pgcsv, dr, drcsv, cs, cscsv) = _run(pairs)
     v = out["verdict"]
     check("capture pickle written to disk (Exp B CPU path)", cap)
     check("steering summary CSV written", csv)
@@ -387,6 +409,52 @@ def main():
     _c1cell = next(c for name, c in fp["cells"].items() if name.startswith("inject_C1"))
     check("82p: mock C1 axis inert -> C1 emits P' far less than the full swap",
           _c1cell["emit_Pprime_rate"] < fp["cells"]["swap_C4"]["emit_Pprime_rate"])
+
+    print("\n[WO#6 T1.2 pre-registered gap]  82w reads the C1 gap at the C4-peak layer (no C1 cherry-pick)")
+    check("82w: prereg-gap summary CSV written", pgcsv)
+    check("82w: a pre-registered layer was fixed (int)", isinstance(pg["prereg_layer"], int))
+    check("82w: verdict label is one of the defined outcomes",
+          pg["verdict"]["label"] in ("PREREG_GAP_EXCLUDES_ZERO", "PREREG_GAP_BRACKETS_ZERO", "INCONCLUSIVE"))
+    check("82w: a C1 '=' gap CI was produced at the pre-registered layer",
+          pg["c1_gap_at_prereg"] is not None and pg["c1_gap_at_prereg"]["gap_ci"] is not None)
+    # the mock '=' residual carries a genuine product (B*C on dDecode), not pure linear B,C
+    # -> the gap should be detectable (excludes 0) at the pre-registered layer.
+    check("82w: mock product gap excludes 0 (genuine product at '=')",
+          pg["verdict"]["label"] == "PREREG_GAP_EXCLUDES_ZERO")
+
+    print("\n[WO#6 T1.2 dose-response]  82x sweeps inject dose k at C4 (ref) vs C1 (claim)")
+    check("82x: dose-response summary CSV written", drcsv)
+    check("82x: reused the WO#5 capture", dr["reused_capture"] is True)
+    check("82x: verdict label is one of the defined outcomes",
+          dr["verdict"]["label"] in ("DEAD_DIRECTION_CONFIRMED", "WEAK_INSTRUMENT",
+                                      "DIRECTION_IS_CAUSAL", "INCONCLUSIVE"))
+    _k1 = dr["k_grid"][0]
+    _refk1 = dr["ref_dose"].get(f"k{_k1}")
+    _clk1 = dr["claim_dose"].get(f"k{_k1}")
+    # responsive (emit) metric: the calibrated k=1 inject HITS P' at C4 (used site) but NOT at
+    # C1 (the dead direction) — the dead-direction signal in the metric the mock can express.
+    check("82x: C4 reference inject emits P' at k=1 (instrument works at the used site)",
+          _refk1 is not None and (_refk1["emit_Pprime_rate"] or 0.0) >= 0.5)
+    check("82x: C1 claim inject does NOT emit P' (dead direction in the responsive metric)",
+          _clk1 is not None and (_clk1["emit_Pprime_rate"] or 0.0) < (_refk1["emit_Pprime_rate"] or 0.0))
+
+    print("\n[WO#6 T1.3 causal-share]  82y apportions the swap effect between w-hat and its complement")
+    check("82y: causal-share summary CSV written", cscsv)
+    check("82y: reused the WO#5 capture", cs["reused_capture"] is True)
+    check("82y: ran full / w-only / perp interventions",
+          all(k in cs and cs[k]["emit_Pprime_rate"] is not None for k in ("full", "wonly", "perp")))
+    check("82y: emit verdict is one of the defined outcomes",
+          cs["verdict_emit"]["label"] in ("NO_CAUSAL_HANDLE", "DORMANT_DIRECTION_CERTIFIED",
+                                           "DIRECTION_CARRIES_EFFECT", "INCONCLUSIVE"))
+    # mock C4 geometry: decode direction == readout (dP), so the swap effect IS carried by
+    # w-hat -> DIRECTION_CARRIES_EFFECT (the cell correctly does NOT false-certify dormancy;
+    # the DORMANT/NO_HANDLE branches are unit-tested with scalars in test_wo_logic.py).
+    check("82y: full swap emits P' (a causal handle exists in the mock)",
+          cs["full"]["emit_Pprime_rate"] >= 0.5)
+    check("82y: w-only reproduces ~the full effect, perp does not (coupled mock geometry)",
+          cs["wonly"]["emit_Pprime_rate"] >= cs["perp"]["emit_Pprime_rate"])
+    check("82y: emit verdict is DIRECTION_CARRIES_EFFECT (no false dormancy on coupled geometry)",
+          cs["verdict_emit"]["label"] == "DIRECTION_CARRIES_EFFECT")
 
     print("\n" + ("ALL PASS" if not _fails else f"FAILURES: {_fails}"))
     return 0 if not _fails else 1

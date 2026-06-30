@@ -115,6 +115,12 @@ _deliverables = [
     # WORK ORDER #6 (Tier 1.1) — band-robustness panel for the OPERANDS_ONLY illusion:
     "band_robustness_base.json", "band_robustness_instruct.json",
     "band_robustness_summary.csv",
+    # WORK ORDER #6 (Tier 1.2) — pre-registered-layer gap (kills the layer-selection objection):
+    "prereg_gap_base.json", "prereg_gap_instruct.json", "prereg_gap_summary.csv",
+    # WORK ORDER #6 (Tier 1.2) — inject dose-response positive control for the C1 causal null:
+    "dose_response_base.json", "dose_response_instruct.json", "dose_response_summary.csv",
+    # WORK ORDER #6 (Tier 1.3) — causal-share Makelov dormant certification (swap-delta apportionment):
+    "causal_share_base.json", "causal_share_instruct.json", "causal_share_summary.csv",
     # WORK ORDER #6 (Tier 2) — CI hygiene + run-record (Wilson CIs auto-mapped over the
     # accuracy summaries -> *_ci.csv; the camera-ready repro record):
     "run_meta.json",

@@ -2281,6 +2281,292 @@ def _wo_num(x):
     return None if x is None else float(x)
 
 
+# ----------------------------------------------------------------------------
+# 8c) WORK ORDER #6 (Tier 1.2/1.3) — PRE-REGISTERED-LAYER GAP, INJECT DOSE-RESPONSE,
+#     and the CAUSAL-SHARE (swap-projection) dormant certification. Pure logic; the
+#     GPU cells 82w/82x/82y are thin orchestration over these. All numpy/stdlib;
+#     unit-tested in tests/test_wo_logic.py BEFORE any A100 time.
+#
+#   Why these exist (the causal null is the headline, so its CONTROLS are load-bearing):
+#     • wo_prereg_layer / wo_prereg_gap_verdict — kill the "you read the C1 product gap
+#       at C1's own argmax-decodability layer" objection: fix the layer by an INDEPENDENT
+#       criterion (the C4 working-surface decodability peak) and read the C1 gap THERE.
+#     • wo_dose_response_verdict — the positive control for the inject null. A flat C1
+#       inject is only a DEAD DIRECTION (not a DEAD INSTRUMENT) if the SAME inject moves
+#       a reference site with DYNAMIC RANGE (monotone in dose k). Reports WEAK_INSTRUMENT
+#       honestly when no reference moves (then the C1 null is uninterpretable from this
+#       control alone) — committed data shows the answer-site swap is inert even at C4.
+#     • wo_direction_split / wo_causal_share_verdict — Makelov causal half: apportion a
+#       guaranteed-causal swap's answer-effective effect between the DECODABLE direction
+#       w-hat and its orthogonal complement. Certifies DORMANT_DIRECTION only when the
+#       swap MOVES the output (effect_full significant) yet w-hat carries ~none of it;
+#       returns NO_CAUSAL_HANDLE when the swap itself is inert (the '=' site as a whole
+#       is dormant — the committed reality), which is a STRONGER dormancy statement.
+# ----------------------------------------------------------------------------
+def wo_prereg_layer(curve):
+    """Pre-registered layer selection: argmax of a {layer: R^2 (or None)} decodability
+    curve, with a DETERMINISTIC tie-break (LOWEST layer index wins). Returns the int
+    layer or None if no finite value. The point of pre-registration is to FIX the
+    evaluation layer by an INDEPENDENT criterion (the C4 working-surface decodability
+    peak) and then read the C1 product gap THERE — so the C1 gap is NOT reported at its
+    own cherry-picked argmax. Which curve feeds this (the protocol) lives in the GPU
+    cell; the selection rule is here so it is the same, tested, deterministic rule."""
+    best_L, best_v = None, None
+    for L in sorted(curve):
+        v = curve[L]
+        if v is None:
+            continue
+        v = float(v)
+        if not math.isfinite(v):
+            continue
+        if best_v is None or v > best_v:          # strict '>' + ascending scan => lowest-L tie-break
+            best_v, best_L = v, int(L)
+    return best_L
+
+
+def wo_prereg_gap_verdict(prereg_layer, c1_argmax_layer, c1_gap, c4_gap=None,
+                          c1_argmax_gap=None):
+    """Assemble the pre-registered-layer gap decision (pure; tested). The layer-selection
+    objection to the WO#6 band-robustness gap CI is: 'you evaluated the C1 product gap at
+    C1's OWN argmax-decodability layer.' This verdict reports the C1 gap at a
+    PRE-REGISTERED layer (`prereg_layer` = the C4 working-surface decodability peak,
+    chosen independently of C1) and states whether the gap CI still excludes 0.
+      prereg_layer    — L* = argmax C4 '=' B*C decodability (the independent peak).
+      c1_argmax_layer — C1's own argmax-decodability layer (transparency: did we move off it?).
+      c1_gap          — wo_gap_bootstrap dict at L* for the C1 '=' product gap (or None).
+      c4_gap          — (optional) wo_gap_bootstrap dict at L* for C4 '=' (the chosen surface).
+      c1_argmax_gap   — (optional) the C1 gap dict at C1's OWN argmax, to show robustness
+                        across the two layer choices.
+    Labels:
+      PREREG_GAP_EXCLUDES_ZERO — at L*, the C1 product gap CI lo>0: the small product
+        component SURVIVES layer pre-registration (the cherry-pick objection is killed).
+      PREREG_GAP_BRACKETS_ZERO — at L*, the gap CI brackets 0: the product component is
+        NOT robust to layer pre-registration (a layer-selection artifact).
+      INCONCLUSIVE — the C1 gap CI at L* is unavailable.
+    Returns a decision record with the raw CIs + the explicit rule (no bare label)."""
+    def _ci(g):
+        return None if not g else list(g.get("gap_ci") or [None, None])
+    def _exc(g):
+        return None if not g else bool(g.get("gap_excludes_zero"))
+    c1_ci = _ci(c1_gap)
+    c1_exc = _exc(c1_gap)
+    out = {"prereg_layer": (None if prereg_layer is None else int(prereg_layer)),
+           "c1_argmax_layer": (None if c1_argmax_layer is None else int(c1_argmax_layer)),
+           "moved_off_c1_argmax": (None if (prereg_layer is None or c1_argmax_layer is None)
+                                   else bool(int(prereg_layer) != int(c1_argmax_layer))),
+           "c1_gap_mean": (None if not c1_gap else _wo_num(c1_gap.get("gap_mean"))),
+           "c1_gap_ci": c1_ci, "c1_excludes_zero": c1_exc,
+           "c4_gap_mean": (None if not c4_gap else _wo_num(c4_gap.get("gap_mean"))),
+           "c4_gap_ci": _ci(c4_gap), "c4_excludes_zero": _exc(c4_gap),
+           "c1_argmax_excludes_zero": _exc(c1_argmax_gap),
+           "robust_to_layer_choice": (None if (c1_exc is None or _exc(c1_argmax_gap) is None)
+                                      else bool(c1_exc and _exc(c1_argmax_gap)))}
+    if c1_exc is None:
+        out["label"] = "INCONCLUSIVE"
+        out["reason"] = ("the C1 '=' product gap CI at the pre-registered layer "
+                         f"L*={out['prereg_layer']} is unavailable (degenerate bootstrap).")
+        return out
+    if c1_exc:
+        out["label"] = "PREREG_GAP_EXCLUDES_ZERO"
+        out["reason"] = (
+            f"at the PRE-REGISTERED layer L*={out['prereg_layer']} (the C4 decodability peak, "
+            f"chosen independently of C1; C1's own argmax was L={out['c1_argmax_layer']}), the C1 '=' "
+            f"product gap = {_wo_fmt(out['c1_gap_mean'])} with 95%CI=[{_wo_fmt(c1_ci[0])},"
+            f"{_wo_fmt(c1_ci[1])}] still EXCLUDES 0 -> the small product component is not a "
+            "layer-selection artifact.")
+    else:
+        out["label"] = "PREREG_GAP_BRACKETS_ZERO"
+        out["reason"] = (
+            f"at the PRE-REGISTERED layer L*={out['prereg_layer']}, the C1 '=' product gap CI "
+            f"=[{_wo_fmt(c1_ci[0])},{_wo_fmt(c1_ci[1])}] BRACKETS 0: the product component does NOT "
+            "survive evaluating at a layer fixed by the independent C4 criterion (it was read at "
+            "C1's own favourable layer).")
+    return out
+
+
+def wo_dose_response_verdict(k_grid, ref_deltas, ref_cis, claim_deltas, claim_cis,
+                             recover_thr=0.5, null_tol=WO_STEER_NULL_TOL, min_rise=0.1):
+    """Dose-response positive control for the inject causal null (pure; tested). A FLAT
+    C1 inject is a DEAD DIRECTION (the headline) only if the SAME inject instrument has
+    DYNAMIC RANGE at a reference where the product is causally used — otherwise the flat
+    C1 could be a DEAD INSTRUMENT. Inject k*(target - w_hat·resid)*w_hat for k in k_grid;
+    pass the full-product logprob Δ(P'-true) means + bootstrap CIs at each k for:
+      ref_*   — the reference site (e.g. C4 '='): the instrument's dynamic-range proof.
+      claim_* — the C1 '=' site: the dormancy claim.
+    All four are parallel to k_grid. Logic:
+      ref_monotone        = ref means non-decreasing across k AND (last-first) >= min_rise.
+      ref_has_range       = the top-dose ref CI EXCLUDES 0 and ref crosses recover_thr.
+      claim_flat          = every k has |Δ| <= null_tol AND its CI BRACKETS 0.
+    Verdicts:
+      DEAD_DIRECTION_CONFIRMED — ref_has_range AND ref_monotone AND claim_flat: the inject
+        moves the reference (more with dose) yet never moves C1 -> a robust dead direction,
+        not a weak instrument. The strongest support for the causal-dormancy headline.
+      DIRECTION_IS_CAUSAL — NOT claim_flat (some dose moves C1 past null_tol with a CI off
+        0): the probe direction IS a causal handle at C1 -> refutes dormancy.
+      WEAK_INSTRUMENT — claim_flat but the reference ALSO fails to move (not ref_has_range):
+        no dynamic range anywhere on this axis, so the C1 null is UNINTERPRETABLE from this
+        control (need a different positive control, e.g. the operand route). This is the
+        committed-data outcome (the answer-site swap/inject is inert even at C4).
+      INCONCLUSIVE — claim flat, reference moves but not cleanly monotone (range without a
+        clean dose-response).
+    Returns {label, ref_monotone, ref_has_range, claim_flat, ref_top_delta, reason, table}."""
+    k = list(k_grid)
+    rd = [None if x is None else float(x) for x in ref_deltas]
+    cd = [None if x is None else float(x) for x in claim_deltas]
+    rc = [list(c) if c is not None else [None, None] for c in ref_cis]
+    cc = [list(c) if c is not None else [None, None] for c in claim_cis]
+    # reference dynamic range.
+    rd_fin = [x for x in rd if x is not None]
+    nondec = all((rd[i + 1] is not None and rd[i] is not None and rd[i + 1] >= rd[i] - 1e-9)
+                 for i in range(len(rd) - 1)) if len(rd_fin) == len(rd) and rd else False
+    rise = (rd[-1] - rd[0]) if (rd and rd[0] is not None and rd[-1] is not None) else None
+    ref_monotone = bool(nondec and rise is not None and rise >= float(min_rise))
+    ref_top_delta = rd[-1] if rd else None
+    ref_top_lo = rc[-1][0] if rc else None
+    ref_crosses = any((rd[i] is not None and rd[i] >= float(recover_thr)) for i in range(len(rd)))
+    ref_has_range = bool(ref_crosses and ref_top_lo is not None and ref_top_lo > 0.0)
+    # claim flatness: every dose small AND CI brackets 0.
+    def _flat(d, c):
+        return (d is not None and abs(d) <= float(null_tol)
+                and c[0] is not None and c[1] is not None and c[0] <= 0.0 <= c[1])
+    claim_flat = bool(cd and all(_flat(cd[i], cc[i]) for i in range(len(cd))))
+    claim_moves_at = [k[i] for i in range(len(cd))
+                      if cd[i] is not None and abs(cd[i]) > float(null_tol)
+                      and cc[i][0] is not None and not (cc[i][0] <= 0.0 <= cc[i][1])]
+    table = [{"k": k[i], "ref_delta": rd[i], "ref_ci": rc[i],
+              "claim_delta": cd[i], "claim_ci": cc[i]} for i in range(len(k))]
+    out = {"k_grid": k, "ref_monotone": ref_monotone, "ref_has_range": ref_has_range,
+           "claim_flat": claim_flat, "ref_top_delta": ref_top_delta,
+           "claim_moves_at_k": claim_moves_at, "recover_thr": float(recover_thr),
+           "null_tol": float(null_tol), "min_rise": float(min_rise), "table": table}
+    if not claim_flat:
+        out["label"] = "DIRECTION_IS_CAUSAL"
+        out["reason"] = (f"the C1 inject moves the output past |Δ|>{null_tol} with a CI off 0 at "
+                         f"k={claim_moves_at}: the probe direction IS a causal handle at C1 — this "
+                         "refutes the dormancy claim at the '=' site.")
+        return out
+    if not ref_has_range:
+        out["label"] = "WEAK_INSTRUMENT"
+        out["reason"] = (
+            f"C1 is flat at every dose, but the REFERENCE site also fails to move (top-dose Δ="
+            f"{_wo_fmt(ref_top_delta)}, crosses {recover_thr}={ref_crosses}, top CI lo="
+            f"{_wo_fmt(ref_top_lo)}): there is NO dynamic range on this inject axis, so the C1 null "
+            "is a possible DEAD INSTRUMENT and is uninterpretable from this control alone — the "
+            "positive control must come from a site/route that does move (e.g. the operand path).")
+        return out
+    if ref_monotone:
+        out["label"] = "DEAD_DIRECTION_CONFIRMED"
+        out["reason"] = (
+            f"the SAME inject moves the reference monotonically with dose (Δ rises by "
+            f"{_wo_fmt(rise)} from k={k[0]} to k={k[-1]}, crossing {recover_thr} with a CI off 0) "
+            f"yet NEVER moves C1 (|Δ|<={null_tol}, CI brackets 0 at every k): a robust DEAD "
+            "DIRECTION, not a weak instrument — the inject causal null at C1 stands.")
+        return out
+    out["label"] = "INCONCLUSIVE"
+    out["reason"] = (f"C1 flat and the reference has range (crosses {recover_thr}) but the dose-"
+                     "response is not cleanly monotone (rise "
+                     f"{_wo_fmt(rise)} < {min_rise} or non-increasing) — range without a clean "
+                     "dose-response; report the table, do not certify.")
+    return out
+
+
+def wo_direction_split(delta, w):
+    """Split a steering DELTA vector (e.g. the full-residual swap delta resid_donor -
+    resid_clean at the '=' site) into its component ALONG the decode direction `w` and the
+    orthogonal remainder:
+        w_hat = w/||w|| ; comp = (delta·w_hat) w_hat ; perp = delta - comp.
+    Returns {w_comp, perp, w_frac, dot, delta_norm} where
+        w_frac = ||comp|| / ||delta||   (the share of the swap's MAGNITUDE along w-hat — a
+                 geometry number; the CAUSAL share is measured separately by applying comp
+                 vs perp as steers and reading the output effect).
+    Pure numpy; last axis is the feature axis. None on a zero delta or zero w."""
+    d = np.asarray(delta, dtype=float).ravel()
+    wv = np.asarray(w, dtype=float).ravel()
+    dn = float(np.linalg.norm(d))
+    wn = float(np.linalg.norm(wv))
+    if dn == 0.0 or wn == 0.0 or d.shape != wv.shape:
+        return None
+    what = wv / wn
+    dot = float(d @ what)
+    comp = dot * what
+    perp = d - comp
+    return {"w_comp": comp, "perp": perp, "dot": dot, "delta_norm": dn,
+            "w_frac": float(np.linalg.norm(comp) / dn)}
+
+
+def wo_causal_share_verdict(effect_full, effect_perp, effect_wonly, ci_full=None,
+                            ci_perp=None, ci_wonly=None, effect_floor=0.5,
+                            share_dormant=0.2, share_coupled=0.6, w_share_ci=None):
+    """Makelov CAUSAL half: apportion a guaranteed-causal swap's ANSWER-EFFECTIVE effect
+    between the decodable direction w-hat and its orthogonal complement (pure; tested).
+    The full-residual swap at the '=' site is the causal probe; measure its full-product
+    answer effect three ways (same metric, e.g. emit-P' rate or logprob Δ(P'-true)):
+      effect_full  — apply the WHOLE swap delta (donor - clean): the total causal effect.
+      effect_wonly — apply ONLY the w-hat component of the swap delta (wo_direction_split
+                     w_comp): how much the DECODABLE direction alone moves the output.
+      effect_perp  — apply the swap delta with w-hat ABLATED (the perp remainder): does the
+                     effect SURVIVE removing the decodable direction?
+    Decision (the dormant certification the causal null needs):
+      NO_CAUSAL_HANDLE — |effect_full| < effect_floor: the FULL swap itself does not move
+        the output. The '=' site carries NO answer-effective effect to apportion -> the
+        whole site is causally dormant (decode present, output re-derived from operands;
+        Stolfo). A STRONGER dormancy statement than a dormant direction, and the committed
+        reality (lateswap emit-P'=0, fullproduct SITE_OR_METRIC_STILL_BROKEN).
+      DORMANT_DIRECTION_CERTIFIED — effect_full significant, w_share = effect_wonly/effect_full
+        <= share_dormant AND the effect SURVIVES w-hat ablation (effect_perp >= (1-share_dormant)
+        *effect_full): the decodable direction carries ~none of the causal effect -> Makelov
+        dormant DIRECTION (decoding != causal direction).
+      DIRECTION_CARRIES_EFFECT — w_share >= share_coupled: the decodable direction carries
+        most of the effect -> logit-coupled, NOT dormant on this evidence.
+      INCONCLUSIVE — mixed / a required effect is undefined.
+    Returns {label, w_share, w_share_ci, effect_full, effect_perp, effect_wonly, reason}."""
+    out = {"effect_full": _wo_num(effect_full), "effect_perp": _wo_num(effect_perp),
+           "effect_wonly": _wo_num(effect_wonly), "effect_floor": float(effect_floor),
+           "share_dormant": float(share_dormant), "share_coupled": float(share_coupled),
+           "w_share": None, "w_share_ci": (list(w_share_ci) if w_share_ci is not None else None),
+           "ci_full": (list(ci_full) if ci_full is not None else None),
+           "ci_perp": (list(ci_perp) if ci_perp is not None else None),
+           "ci_wonly": (list(ci_wonly) if ci_wonly is not None else None)}
+    if effect_full is None or effect_perp is None or effect_wonly is None:
+        out["label"] = "INCONCLUSIVE"
+        out["reason"] = "a required effect (full / perp / w-only) is undefined."
+        return out
+    ef, ep, ew = float(effect_full), float(effect_perp), float(effect_wonly)
+    if abs(ef) < float(effect_floor):
+        out["label"] = "NO_CAUSAL_HANDLE"
+        out["reason"] = (
+            f"the FULL residual swap at the '=' site moves the output by only {_wo_fmt(ef)} "
+            f"(|effect_full| < {effect_floor}): there is no answer-effective causal effect at the "
+            "site to apportion. The '=' site is causally dormant as a whole (the decodable product "
+            "is re-derived from the operands; Stolfo) — a stronger dormancy statement than a dormant "
+            "direction.")
+        return out
+    w_share = ew / ef
+    out["w_share"] = float(w_share)
+    perp_survives = ep >= (1.0 - float(share_dormant)) * ef
+    if w_share <= float(share_dormant) and perp_survives:
+        out["label"] = "DORMANT_DIRECTION_CERTIFIED"
+        out["reason"] = (
+            f"the full swap moves the output ({_wo_fmt(ef)} >= {effect_floor}); steering ONLY the "
+            f"decodable direction reproduces just {_wo_fmt(ew)} (w_share={_wo_fmt(w_share)} <= "
+            f"{share_dormant}) while the effect SURVIVES ablating w-hat (perp {_wo_fmt(ep)} ~ full "
+            f"{_wo_fmt(ef)}): the decodable direction carries ~none of the causal effect — a Makelov "
+            "dormant DIRECTION (decoding != causal direction).")
+    elif w_share >= float(share_coupled):
+        out["label"] = "DIRECTION_CARRIES_EFFECT"
+        out["reason"] = (
+            f"steering only the decodable direction reproduces {_wo_fmt(ew)} of the full "
+            f"{_wo_fmt(ef)} (w_share={_wo_fmt(w_share)} >= {share_coupled}): the decodable direction "
+            "carries most of the causal effect — logit-coupled, NOT dormant on this evidence.")
+    else:
+        out["label"] = "INCONCLUSIVE"
+        out["reason"] = (
+            f"mixed: w_share={_wo_fmt(w_share)} (in ({share_dormant},{share_coupled})), perp "
+            f"{_wo_fmt(ep)} vs full {_wo_fmt(ef)} — the causal effect is split across w-hat and its "
+            "complement; no clean certification.")
+    return out
+
+
 def wo_localization_verdict(operand_pos_recovery, best_head_recovery, n_heads_for_half,
                             recover_thr=0.4, sparse_max=8):
     """Classify WHERE the operand->answer computation lives, from EXACT denoising-
