@@ -1157,6 +1157,40 @@ def test_ci_repro_hygiene():
     check("decision_record states the explicit rule", "0.30" in rec["decision_rule"])
 
 
+def test_gap_bootstrap_decides_representation():
+    # The decision-grade test: gap = R^2_real - linear-(B,C) baseline. CI brackets 0 ->
+    # operand-explained; CI excludes 0 -> real (small) product component.
+    import numpy as np
+    gb = WO["wo_gap_bootstrap"]; pc = WO["wo_pct_ci"]
+    rng = np.random.default_rng(11); n = 240
+    B = rng.integers(2, 99, n).astype(float); C = rng.integers(2, 99, n).astype(float); prod = B * C
+    # operand-only residual (B,C linear, NO genuine product) -> gap CI brackets 0.
+    Xop = rng.standard_normal((n, 96))
+    for j in range(3):
+        Xop[:, j] = (B - B.mean()) / B.std() * 2 + 0.3 * rng.standard_normal(n)
+    for j in range(3, 6):
+        Xop[:, j] = (C - C.mean()) / C.std() * 2 + 0.3 * rng.standard_normal(n)
+    rop = gb(Xop, B, C, n_boot=80, seed=0)
+    check("operand-only: gap CI brackets 0 (not detectably represented)",
+          rop is not None and rop["gap_ci"][0] <= 0.0 <= rop["gap_ci"][1])
+    check("operand-only: gap_excludes_zero is False", not rop["gap_excludes_zero"])
+    # genuine product residual -> gap CI excludes 0.
+    Xpr = rng.standard_normal((n, 96))
+    for j in range(3):
+        Xpr[:, j] = (prod - prod.mean()) / prod.std() * 2 + 0.3 * rng.standard_normal(n)
+    rpr = gb(Xpr, B, C, n_boot=80, seed=0)
+    check("genuine product: gap CI excludes 0 (lo>0)", rpr is not None and rpr["gap_ci"][0] > 0.0)
+    check("genuine product: gap_excludes_zero is True", rpr["gap_excludes_zero"])
+    check("genuine product: r2_real CI lies above the operand baseline CI",
+          rpr["r2_real_ci"][0] > rpr["r2_base_ci"][1])
+    # PAIRED cross-surface diff (same seed -> same item draws): product gap > operand gap.
+    diff = np.array(rpr["_gaps"]) - np.array(rop["_gaps"])
+    dlo, dhi = pc(diff)
+    check("paired surface-gap difference CI excludes 0 when one surface has more product", dlo > 0.0)
+    check("wo_pct_ci empty -> (None,None)", pc([]) == (None, None))
+    check("wo_gap_bootstrap degenerate -> None", gb(np.zeros((4, 96)), B[:4], C[:4], n_boot=10) is None)
+
+
 def main():
     for fn in sorted(g for g in globals() if g.startswith("test_")):
         print(f"\n{fn}:")

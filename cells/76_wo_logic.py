@@ -660,6 +660,58 @@ def wo_r2_bootstrap_ci(X, y, folds=5, ridge=1.0, n_boot=200, alpha=0.05, seed=0)
     return (lo, hi)
 
 
+def wo_pct_ci(arr, alpha=0.05):
+    """Percentile (1-alpha) CI of a 1-D array of bootstrap statistics. (None,None) on empty."""
+    a = np.asarray(arr, dtype=float).ravel()
+    if a.size == 0:
+        return (None, None)
+    return (float(np.percentile(a, 100.0 * (alpha / 2.0))),
+            float(np.percentile(a, 100.0 * (1.0 - alpha / 2.0))))
+
+
+def wo_gap_bootstrap(X, B, C, target="B_times_C", n_boot=300, folds=5, ridge=1.0,
+                     seed=0, n_noise=128, alpha=0.05):
+    """Paired item-bootstrap for the SELECTIVITY GAP = R^2_real - R^2_linearBC — the
+    quantity that actually decides the claim: gap CI INCLUDES 0 -> the answer-site product
+    is operand-explained (no detectable product even with headroom); gap CI EXCLUDES 0 ->
+    a small but REAL product component (then the claim must shift from 'not represented' to
+    'weakly represented but causally dormant'). The reviewer cares about this, not an
+    arbitrary fixed margin.
+
+    Per draw: resample the n items WITH replacement; recompute R^2_real on X[idx] and
+    R^2_linearBC on a fresh linear-(B,C) baseline built from the resampled operands B[idx],
+    C[idx] (baseline NOISE held fixed at seed+1 so only the operand resample moves the
+    baseline, not re-drawn noise); gap = R^2_real - R^2_linearBC. Returns the per-draw
+    arrays AND their percentile CIs. The arrays (`_gaps`) let a caller difference two
+    surfaces' gaps with PAIRED draws by reusing the SAME `seed` (identical idx sequence).
+    Pure numpy + wo_cv_r2 / wo_linear_bc_baseline. None on degenerate."""
+    X = np.asarray(X, dtype=float)
+    B = np.asarray(B, dtype=float)
+    C = np.asarray(C, dtype=float)
+    y = {"B": B, "C": C, "B_times_C": B * C}[target]
+    n = X.shape[0]
+    if X.ndim != 2 or len(y) != n:
+        return None
+    rng = np.random.default_rng(int(seed))
+    gaps, rr, rb = [], [], []
+    for _d in range(int(n_boot)):
+        idx = rng.integers(0, n, size=n)
+        r_real = wo_cv_r2(X[idx], y[idx], folds=folds, ridge=ridge)
+        r_base = wo_cv_r2(wo_linear_bc_baseline(B[idx], C[idx], n_noise=n_noise, seed=int(seed) + 1),
+                          y[idx], folds=folds, ridge=ridge)
+        if r_real is None or r_base is None:
+            continue
+        gaps.append(r_real - r_base); rr.append(r_real); rb.append(r_base)
+    if len(gaps) < max(10, int(0.5 * int(n_boot))):
+        return None
+    g = np.asarray(gaps)
+    gci = wo_pct_ci(g, alpha)
+    return {"gap_mean": float(g.mean()), "gap_ci": gci,
+            "gap_excludes_zero": bool(gci[0] is not None and gci[0] > 0.0),
+            "r2_real_ci": wo_pct_ci(rr, alpha), "r2_base_ci": wo_pct_ci(rb, alpha),
+            "n_boot_used": len(gaps), "_gaps": [float(x) for x in g]}
+
+
 def wo_run_meta(model_tag=None, model_revision=None, tl_version=None, torch_version=None,
                 transformers_version=None, prepend_bos=None, band=None, n=None, seed=None,
                 pairs_sha=None, extra=None):
@@ -2702,6 +2754,22 @@ def _wo_selftest():
     assert _rm["band"] == list(WO_BAND) and _rm["N"] == WO_N and "parse_rule" in _rm
     _dr = wo_decision_record([{"cond": "x", "acc": 0.3}], "drop>=0.30 vs bare", label="OP_MISMATCH")
     assert _dr["label_heuristic"] == "OP_MISMATCH" and _dr["table"][0]["acc"] == 0.3 and "0.30" in _dr["decision_rule"]
+    # WO#6 gap bootstrap — the decision-grade CI on (R^2_real - linear-(B,C) baseline).
+    _rg = np.random.default_rng(5); _gn = 200
+    _gB = _rg.integers(2, 99, _gn).astype(float); _gC = _rg.integers(2, 99, _gn).astype(float); _gp = _gB * _gC
+    _Xop = _rg.standard_normal((_gn, 80))
+    for _j in range(3):
+        _Xop[:, _j] = (_gB - _gB.mean()) / _gB.std() * 2 + 0.3 * _rg.standard_normal(_gn)
+    for _j in range(3, 6):
+        _Xop[:, _j] = (_gC - _gC.mean()) / _gC.std() * 2 + 0.3 * _rg.standard_normal(_gn)
+    _gop = wo_gap_bootstrap(_Xop, _gB, _gC, n_boot=60, seed=0)
+    assert _gop is not None and _gop["gap_ci"][0] <= 0.0 <= _gop["gap_ci"][1], _gop["gap_ci"]   # operand-only -> CI brackets 0
+    _Xpr = _rg.standard_normal((_gn, 80))
+    for _j in range(3):
+        _Xpr[:, _j] = (_gp - _gp.mean()) / _gp.std() * 2 + 0.3 * _rg.standard_normal(_gn)
+    _gpr = wo_gap_bootstrap(_Xpr, _gB, _gC, n_boot=60, seed=0)
+    assert _gpr is not None and _gpr["gap_excludes_zero"] and _gpr["gap_ci"][0] > 0.0, _gpr["gap_ci"]  # real product -> CI excludes 0
+    assert wo_pct_ci(np.array(_gpr["_gaps"]) - np.array(_gop["_gaps"]))[0] > 0.0       # paired diff CI > 0
     return True
 
 
