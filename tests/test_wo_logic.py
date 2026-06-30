@@ -1121,6 +1121,42 @@ def test_wrapper_blindspot():
     check("not operation-specific when add also breaks", not v(rb)["operation_specific"])
 
 
+def test_ci_repro_hygiene():
+    import numpy as np
+    ac = WO["wo_acc_ci"]; r2c = WO["wo_r2_bootstrap_ci"]; rm = WO["wo_run_meta"]; dr = WO["wo_decision_record"]
+    lo, hi = ac(27 / 400, 400)
+    check("wo_acc_ci(0.0675,400) ~ wilson(27,400)", abs(lo - 0.047) < 0.003 and abs(hi - 0.097) < 0.003)
+    check("wo_acc_ci brackets the accuracy", lo <= 27 / 400 <= hi)
+    check("wo_acc_ci(None) -> (None,None)", ac(None, 400) == (None, None))
+    # item-bootstrap R^2 CI: signal -> CI above 0, noise -> CI low; deterministic given seed.
+    rng = np.random.default_rng(4); n, d = 140, 96
+    y = rng.integers(20, 50, n).astype(float); X = rng.standard_normal((n, d))
+    for j in range(3):
+        X[:, j] = (y - y.mean()) * 2 + 0.4 * rng.standard_normal(n)
+    slo, shi = r2c(X, y, n_boot=60, seed=0)
+    check("R^2 bootstrap CI on signal excludes 0 (lo>0.3)", slo is not None and slo > 0.3)
+    check("R^2 bootstrap CI is a proper interval", slo < shi)
+    check("R^2 bootstrap CI deterministic", r2c(X, y, n_boot=60, seed=0) == (slo, shi))
+    nlo, nhi = r2c(rng.standard_normal((n, d)), rng.standard_normal(n), n_boot=60, seed=0)
+    check("R^2 bootstrap CI on noise is low (hi<0.5)", nhi is not None and nhi < 0.5)
+    check("R^2 bootstrap CI degenerate -> (None,None)", r2c(np.zeros((3, d)), np.zeros(3), n_boot=10) == (None, None))
+    # run-record defaults + override.
+    meta = rm()
+    check("run_meta band/N/seed default to WO constants",
+          meta["band"] == list(WO["WO_BAND"]) and meta["N"] == WO["WO_N"] and meta["seed"] == WO["WO_SEED"])
+    check("run_meta documents the parse + extraction rule", "parse_rule" in meta and "answer_extraction" in meta)
+    meta2 = rm(model_tag="base", model_revision="abc", tl_version="2.x", band=(2, 99), n=400, extra={"foo": 1})
+    check("run_meta carries passed model/version/band + extra",
+          meta2["model_revision"] == "abc" and meta2["transformer_lens"] == "2.x"
+          and meta2["band"] == [2, 99] and meta2["foo"] == 1)
+    # decision record: raw table + explicit rule, label demoted.
+    rec = dr([{"cond": "W_paren_mul", "drop": 0.34}, {"cond": "W_bare_mul", "drop": 0.0}],
+             "mult blind spot iff mean additive-wrapper mult-drop >= 0.30", label="OP_MISMATCH")
+    check("decision_record keeps label as a demoted heuristic", rec["label_heuristic"] == "OP_MISMATCH" and "caveat" in str(rec).lower() or "label_caveat" in rec)
+    check("decision_record carries the raw table", len(rec["table"]) == 2 and rec["table"][0]["drop"] == 0.34)
+    check("decision_record states the explicit rule", "0.30" in rec["decision_rule"])
+
+
 def main():
     for fn in sorted(g for g in globals() if g.startswith("test_")):
         print(f"\n{fn}:")

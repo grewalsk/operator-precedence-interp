@@ -115,6 +115,10 @@ _deliverables = [
     # WORK ORDER #6 (Tier 1.1) — band-robustness panel for the OPERANDS_ONLY illusion:
     "band_robustness_base.json", "band_robustness_instruct.json",
     "band_robustness_summary.csv",
+    # WORK ORDER #6 (Tier 2) — CI hygiene + run-record (Wilson CIs auto-mapped over the
+    # accuracy summaries -> *_ci.csv; the camera-ready repro record):
+    "run_meta.json",
+    "wrapper_map_summary_ci.csv", "cross_model_battery_ci.csv", "band_robustness_summary_ci.csv",
 ]
 _lines.append("deliverables produced (ART/results):")
 for d in _deliverables:

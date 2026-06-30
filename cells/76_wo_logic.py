@@ -617,6 +617,81 @@ def wo_wilson_ci(k, n, alpha=0.05):
     return (max(0.0, center - half), min(1.0, center + half))
 
 
+# ----------------------------------------------------------------------------
+# 8g) WORK ORDER #6 (Tier 2) — CONFIDENCE-INTERVAL + REPRO HYGIENE (pure logic).
+#     Apply a CI to EVERY reported number and a run-record to every experiment, and
+#     package verdicts as raw-table+explicit-rule instead of a single averaged label
+#     (the failure mode that mislabeled the wrapper map + produced the false Gemma
+#     'REPLICATES'). All numpy/json/stdlib; unit-tested.
+# ----------------------------------------------------------------------------
+def wo_acc_ci(acc, n, alpha=0.05):
+    """Wilson CI for an accuracy given as a PROPORTION over n items (k=round(acc*n)).
+    Attaches a CI to every committed accuracy (wrapper drops, cross-model rows, C0/C4)
+    with no re-run — n is the item count (e.g. WO_N=400). (None,None) on missing input."""
+    if acc is None or n is None or int(n) == 0:
+        return (None, None)
+    return wo_wilson_ci(int(round(float(acc) * int(n))), int(n), alpha=alpha)
+
+
+def wo_r2_bootstrap_ci(X, y, folds=5, ridge=1.0, n_boot=200, alpha=0.05, seed=0):
+    """Item (case) bootstrap CI for the dual-ridge CV-R^2 (wo_cv_r2): resample the n
+    items WITH replacement n_boot times, recompute CV-R^2 on each draw, return the
+    percentile (1-alpha) interval — the item-sampling variability of a decodability R^2
+    that reviewers ask for on every probe number. Pure numpy + wo_cv_r2; n_boot modest
+    (each draw is a full CV). NOTE: resample-then-CV mildly under-states width via
+    duplicate items spanning folds — a conventional, slightly-optimistic bootstrap.
+    (None,None) if degenerate."""
+    X = np.asarray(X, dtype=float)
+    y = np.asarray(y, dtype=float)
+    if X.ndim != 2 or len(y) != X.shape[0]:
+        return (None, None)
+    n = X.shape[0]
+    rng = np.random.default_rng(int(seed))
+    vals = []
+    for _ in range(int(n_boot)):
+        idx = rng.integers(0, n, size=n)
+        r = wo_cv_r2(X[idx], y[idx], folds=folds, ridge=ridge)
+        if r is not None:
+            vals.append(r)
+    if len(vals) < max(10, int(0.5 * int(n_boot))):
+        return (None, None)
+    lo = float(np.percentile(vals, 100.0 * (alpha / 2.0)))
+    hi = float(np.percentile(vals, 100.0 * (1.0 - alpha / 2.0)))
+    return (lo, hi)
+
+
+def wo_run_meta(model_tag=None, model_revision=None, tl_version=None, torch_version=None,
+                transformers_version=None, prepend_bos=None, band=None, n=None, seed=None,
+                pairs_sha=None, extra=None):
+    """A reproducibility run-record (seed, band, N, model revision, library versions,
+    parse/answer-extraction rule) to emit as run_meta.json beside each result CSV — the
+    camera-ready repro record. Pure: the GPU cell passes the live versions/revision;
+    band/N/seed default to the canonical WO constants."""
+    meta = {"band": list(band) if band is not None else list(WO_BAND),
+            "N": int(n) if n is not None else WO_N,
+            "seed": int(seed) if seed is not None else WO_SEED,
+            "pairs_sha": pairs_sha, "model_tag": model_tag, "model_revision": model_revision,
+            "parse_rule": "wo_parse_int: first signed integer; strips commas; tolerates leading "
+                          "space / multi-token; parse-fail counts as incorrect",
+            "answer_extraction": "greedy decode K=WO_MAX_NEW_TOKENS; exact_acc = parsed == ground truth",
+            "transformer_lens": tl_version, "torch": torch_version,
+            "transformers": transformers_version, "prepend_bos": prepend_bos}
+    if extra:
+        meta.update(extra)
+    return meta
+
+
+def wo_decision_record(table, rule, label=None,
+                       label_caveat="heuristic summary; the table + rule are the source of truth"):
+    """Package a verdict as RAW TABLE + the EXPLICIT decision rule it applied, instead
+    of one averaged label. `table` = list of per-condition dicts (the numbers + their
+    CIs); `rule` = the threshold rule string actually applied. The one-word `label` is
+    kept but DEMOTED to a clearly-marked heuristic. This is the fix for the verdict-
+    compression failure (wrapper mislabel, false Gemma 'REPLICATES'). Pure."""
+    return {"label_heuristic": label, "label_caveat": label_caveat,
+            "decision_rule": str(rule), "table": list(table)}
+
+
 def wo_classify_wrong_output(pred, B, C):
     """Bucket C1's PARSED prediction into one diagnostic category (§3.6), so the
     failure mode is legible ('does it return B? C? B+C? garbage?'). Priority order
@@ -2612,6 +2687,21 @@ def _wo_selftest():
     assert wo_wrapper_verdict(_w7p)["driver"] == "PARENS"
     _w7n = {k: (0.9 if k.endswith("mul") else 0.95) for k in _w7acc}
     assert wo_wrapper_verdict(_w7n)["driver"] == "NONE" and not wo_wrapper_verdict(_w7n)["mult_blindspot"]
+    # WORK ORDER #6 Tier 2 — CI + repro hygiene helpers.
+    _ac = wo_acc_ci(27 / 400, 400)
+    assert abs(_ac[0] - 0.047) < 0.003 and abs(_ac[1] - 0.097) < 0.003, _ac
+    _rng2 = np.random.default_rng(2); _n2, _d2 = 120, 64
+    _ys = _rng2.integers(20, 50, _n2).astype(float); _Xs = _rng2.standard_normal((_n2, _d2))
+    for _j in range(3):
+        _Xs[:, _j] = (_ys - _ys.mean()) * 2 + 0.4 * _rng2.standard_normal(_n2)
+    _r2lo, _r2hi = wo_r2_bootstrap_ci(_Xs, _ys, n_boot=40, seed=0)
+    assert _r2lo is not None and _r2lo > 0.3, (_r2lo, _r2hi)        # signal -> CI well above 0
+    _nlo, _nhi = wo_r2_bootstrap_ci(_rng2.standard_normal((_n2, _d2)), _rng2.standard_normal(_n2), n_boot=40, seed=0)
+    assert _nhi is not None and _nhi < 0.5                          # noise -> CI not high
+    _rm = wo_run_meta()
+    assert _rm["band"] == list(WO_BAND) and _rm["N"] == WO_N and "parse_rule" in _rm
+    _dr = wo_decision_record([{"cond": "x", "acc": 0.3}], "drop>=0.30 vs bare", label="OP_MISMATCH")
+    assert _dr["label_heuristic"] == "OP_MISMATCH" and _dr["table"][0]["acc"] == 0.3 and "0.30" in _dr["decision_rule"]
     return True
 
 
