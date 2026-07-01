@@ -1,0 +1,34 @@
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Surface form and mathematical brittleness.}
+Model math accuracy is sensitive to surface structure that leaves the answer invariant.
+\citet{williamson-etal-2025-syntactic}, at the same venue, characterize a behavioral blind spot
+in natural-language word problems where failure tracks dependency-locality complexity and
+recovers under structure-lowering rephrasing, and conjecture a coupling between surface form and
+internal representation. Our instance is orthogonal on both axes and \emph{tests} that
+conjecture: a token-matched \emph{symbolic} expression whose additive-identity wrapper carries no
+dependency-locality cost, for which we show the obvious representational reading (a
+computed-but-unused product at the answer site) does not hold; the internal signature is a
+dormant, operand-explained subspace, not a missing representation. \citet{reusch-lehner-2022-extracting}
+show operator-tree structure is decodable from embeddings; we show that answer-site decodability
+of the arithmetic \emph{value} can be an operand-reconstructible artifact that is causally inert,
+so decodability of arithmetic structure does not certify its use.
+
+\paragraph{Decodability versus causal use.}
+A linear probe measures correlation, not use \citep{belinkov-2022-probing}, and can succeed on
+random labels without a control \citep{hewitt-liang-2019-designing}. The sharpest form is the
+subspace-patching illusion of \citet{makelov-etal-2024-subspace}: a direction can carry a
+decodable signal yet be causally disconnected from the output. Our result is an arithmetic
+instance of this illusion, established with a baseline and a steering test rather than assumed.
+\citet{matsumoto-etal-2022-tracing} find decoded intermediate values in neural math solvers to
+be causally usable; we find a decodable answer-site subspace that is causally inert. The results
+are compatible: whether a decodable value is used is a per-site empirical question.
+
+\paragraph{Mechanisms of arithmetic.}
+\citet{stolfo-etal-2023-mechanistic} trace arithmetic from operand tokens to the final position
+through late modules, and \citet{nikankin-etal-2025-arithmetic} argue models use a diffuse ``bag
+of heuristics.'' Our localization agrees, and adds that the decodable answer-site value, easily
+mistaken for the computed result, is a byproduct of that operand information. For method we
+follow patching best practice \citep{zhang-nanda-2024-towards, heimersheim-nanda-2024-use}:
+symmetric counterfactuals, a full-answer log-probability metric, and a positive control per null.

@@ -1,0 +1,84 @@
+{
+  "tag": "base",
+  "experiment": "WO6_T1.3_causal_share",
+  "reused_capture": true,
+  "swap_layer": 19,
+  "ref_site": "C4_equals",
+  "decode_direction": "C4 '=' B*C ridge probe (the decodable product direction)",
+  "mean_w_frac_geometry": 0.19969232335559434,
+  "full": {
+    "logprob_delta": 0.5926892348210094,
+    "logprob_ci": [
+      0.5128486588384112,
+      0.6733077938128117
+    ],
+    "emit_Pprime_rate": 0.0,
+    "n": 200,
+    "gen_n": 60
+  },
+  "wonly": {
+    "logprob_delta": 0.08089271789358463,
+    "logprob_ci": [
+      0.06227080487228523,
+      0.10048646824913157
+    ],
+    "emit_Pprime_rate": 0.0,
+    "n": 200,
+    "gen_n": 60
+  },
+  "perp": {
+    "logprob_delta": 0.5021428167668637,
+    "logprob_ci": [
+      0.42923288423710615,
+      0.5776670894205163
+    ],
+    "emit_Pprime_rate": 0.0,
+    "n": 200,
+    "gen_n": 60
+  },
+  "verdict_emit": {
+    "effect_full": 0.0,
+    "effect_perp": 0.0,
+    "effect_wonly": 0.0,
+    "effect_floor": 0.5,
+    "share_dormant": 0.2,
+    "share_coupled": 0.6,
+    "w_share": null,
+    "w_share_ci": [
+      null,
+      null
+    ],
+    "ci_full": null,
+    "ci_perp": null,
+    "ci_wonly": null,
+    "label": "NO_CAUSAL_HANDLE",
+    "reason": "the FULL residual swap at the '=' site moves the output by only 0.000 (|effect_full| < 0.5): there is no answer-effective causal effect at the site to apportion. The '=' site is causally dormant as a whole (the decodable product is re-derived from the operands; Stolfo) \u2014 a stronger dormancy statement than a dormant direction."
+  },
+  "verdict_logprob": {
+    "effect_full": 0.5926892348210094,
+    "effect_perp": 0.5021428167668637,
+    "effect_wonly": 0.08089271789358463,
+    "effect_floor": 1.0,
+    "share_dormant": 0.2,
+    "share_coupled": 0.6,
+    "w_share": null,
+    "w_share_ci": null,
+    "ci_full": [
+      0.5128486588384112,
+      0.6733077938128117
+    ],
+    "ci_perp": [
+      0.42923288423710615,
+      0.5776670894205163
+    ],
+    "ci_wonly": [
+      0.06227080487228523,
+      0.10048646824913157
+    ],
+    "label": "NO_CAUSAL_HANDLE",
+    "reason": "the FULL residual swap at the '=' site moves the output by only 0.593 (|effect_full| < 1.0): there is no answer-effective causal effect at the site to apportion. The '=' site is causally dormant as a whole (the decodable product is re-derived from the operands; Stolfo) \u2014 a stronger dormancy statement than a dormant direction."
+  },
+  "headline_verdict": "NO_CAUSAL_HANDLE",
+  "pair_sha": "db4da1e0b8516c18e8afca479e7c437095d266cf",
+  "note": "Causal-share Makelov certification: apportion the full-residual swap's answer-effective effect between the decode direction w-hat and its orthogonal complement. Primary metric = greedy emit-P'; effect_floor guards against certifying when the swap itself is inert (-> NO_CAUSAL_HANDLE, the whole site dormant). mean_w_frac_geometry is the magnitude share of the swap along w-hat (descriptive); the CAUSAL share is effect_wonly/effect_full."
+}

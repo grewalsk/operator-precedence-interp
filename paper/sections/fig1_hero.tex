@@ -1,0 +1,55 @@
+\begin{figure}[t]
+\centering
+\footnotesize
+\resizebox{0.74\columnwidth}{!}{%
+\begin{tikzpicture}[
+  font=\footnotesize,
+  tok/.style={draw=cbGray,rounded corners=1pt,minimum height=3.6mm,inner sep=1.6pt},
+  op/.style={tok,draw=cbBlue,thick,fill=cbBlue!8},
+  eq/.style={draw=cbOrange,thick,rounded corners=1.5pt,fill=cbOrange!8,minimum height=4mm,inner sep=2pt},
+  probe/.style={-{Latex[length=1.4mm]},cbGreen,thick},
+  dead/.style={-{Latex[length=1.4mm]},cbOrange,thick},
+  comp/.style={-{Latex[length=1.4mm]},cbBlue,thick},
+  lbl/.style={inner sep=1pt,font=\scriptsize},
+]
+% token row
+\node[tok] (p1) {(};
+\node[tok,right=0.6mm of p1] (z) {0};
+\node[tok,right=0.6mm of z] (pl) {+};
+\node[op,right=0.6mm of pl] (B) {$B$};
+\node[tok,right=0.6mm of B] (p2) {)};
+\node[tok,right=0.6mm of p2] (st) {$*$};
+\node[op,right=0.6mm of st] (C) {$C$};
+\node[eq,right=0.9mm of C] (eq) {$=$};
+
+% residual node at '='
+\node[draw=cbOrange,thick,rounded corners=2pt,fill=cbOrange!5,
+      below=6mm of eq,minimum width=17mm,minimum height=5mm,align=center] (res)
+      {answer-site\\ residual};
+\draw[-{Latex[length=1.2mm]},cbGray] (eq) -- (res);
+
+% probe (decodable)
+\node[lbl,cbGreen,align=left,right=10mm of res,yshift=5mm] (dec)
+     {\textbf{decodable}:\ $B,\ B\!\cdot\!C$\\ at $R^2\!\approx\!0.96$};
+\draw[probe] (res.east) to[out=25,in=180] (dec.west);
+
+% steering + swap (inert)
+\node[lbl,cbOrange,align=left,right=10mm of res,yshift=-6mm] (dead)
+     {\textbf{inert}:\ steering \emph{and}\\ full-residual swap\\ leave the output unchanged};
+\draw[dead] (res.east) to[out=-25,in=180] (dead.west);
+
+% computation route from operands
+\node[draw=cbBlue,thick,rounded corners=2pt,fill=cbBlue!5,
+      below=6mm of B,xshift=6mm,minimum width=30mm,minimum height=5mm,align=center] (route)
+     {answer re-derived \emph{here}: diffuse\\ operand positions (recovery $\approx 0.50$)};
+\draw[comp] (B.south) to[out=-90,in=110] (route.north west);
+\draw[comp] (C.south) to[out=-90,in=70] (route.north east);
+\end{tikzpicture}%
+}
+\caption{The answer-site subspace is \emph{dormant}, not missing. At the ``$=$''
+position the operand and near-product are linearly decodable, but that direction is
+causally inert (steering and a full-residual swap change nothing) and operand-explained;
+the answer is instead re-derived diffusely from the operand positions. Decodability at
+the answer site is not evidence of computation there.}
+\label{fig:hero}
+\end{figure}

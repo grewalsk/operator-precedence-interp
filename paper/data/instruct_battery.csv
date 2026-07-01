@@ -1,0 +1,12 @@
+cond,name,acc,corr,parse_fail,n,n_parsed,mean_abs_output,format
+C0,baseline_mult,0.8475,0.982139,0,400,400,1205.21,bare-continuation
+C1,depth_left,0.265,-0.0431469,0,400,400,302.192,bare-continuation
+C2,depth_right,0.6775,0.230076,0,400,400,847.005,bare-continuation
+C3,parens_only_out,0.755,0.545653,0,400,400,1000.75,bare-continuation
+C4,parens_only_in,0.9075,0.958906,0,400,400,1199.39,bare-continuation
+C5,identity_no_paren,0.5425,0.281697,0.03,400,388,702.567,bare-continuation
+C6,subexpr_alone,1,1,0,400,400,34.47,bare-continuation
+C7,format_variant,0.19,0.16201,0.035,400,386,420.272,bare-continuation
+C8,nospace_in_bracket,0.785,0.909903,0,400,400,1175.94,bare-continuation
+
+# derived,|acc(C1)-acc(C2)|=0.4125,Jaccard(C1,C2)=0.3561

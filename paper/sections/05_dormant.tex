@@ -1,0 +1,67 @@
+\section{A Dormant Subspace}
+\label{sec:dormant}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.99\textwidth]{figs/fig2_evidence.pdf}
+\caption{The decodable answer-site subspace is dormant (bars are $95\%$ CIs). \textbf{(a)}
+Selectivity gap (decode $R^2$ for \bc{} at ``$=$'' minus a linear-$(B,C)$ baseline): at $[20,49]$
+no headroom (gap $\approx 0$, operand-explained); at $[2,99]$ a small gap whose CI excludes zero.
+\textbf{(b)} Causal share of a full-residual swap at ``$=$'' (base): ablating the decode
+direction (perp) preserves most of the effect, the decode direction alone (w-only) reproduces
+little, CIs non-overlapping; the swap flips no answers (emit-$P' = 0$). \textbf{(c)} The
+dissociation as a fraction of the answer moved (two metrics): patching moves the answer at the
+operand positions (recovery $0.50$) but the answer-site swap flips nothing, a dead \emph{site},
+not a dead probe.}
+\label{fig:evidence}
+\end{figure*}
+
+The seductive story is that the product is computed and represented at the answer position but
+not read out. We test it in three steps and reject it.
+
+\paragraph{The product decodes (RQ2, correlational).}
+A cross-validated probe recovers \bc{} from the ``$=$'' residual at $R^2 = 0.965$ (instruct),
+$0.967$ (base) and the operand $B$ at $0.97$, with $B$ decodable at ``)'' at \emph{every} layer
+including the last (instruct $0.98$, layer 31); taken alone this looks like a represented product.
+
+\paragraph{But the decode is operand-dominated (RQ2, selectivity).}
+Decodability of \bc{} need not mean the product is represented, since \bc{} is itself largely
+linear in $B, C$ over a narrow band. We compare against a linear-$(B,C)$ baseline
+(Figure~\ref{fig:evidence}a). At $[20,49]$ the baseline reaches $R^2 = 0.968$, equal to the
+decode, so the gap is $-0.0002$: no headroom, nothing beyond the operands. At $[2,99]$, where
+\bc{} is nonlinear in the operands, a small gap appears: $+0.068$, $95\%$ CI $[0.051, 0.086]$
+(base) and $+0.060$, $[0.043, 0.079]$ (instruct), both excluding zero, and still positive at a
+layer pre-registered from the C4 decode peak rather than the C1 argmax. We flag that $[2,99]$ is
+a harder regime where the parts fall below our $0.80$ floor (C4 $= 0.71$ base,
+$0.73$ instruct), so we read it as a stress test, not a comfortably
+in-scope measurement, and rest the headline on the band-independent causal null below. The
+decode is operand-dominated ($\geq 0.94$ of it is reproduced by the linear-$(B,C)$ baseline,
+$\approx 1.0$ at $[20,49]$) with at most a small genuine component that tracks behavior (the
+succeeding C4 surface carries a larger gap than the failing C1).
+
+\paragraph{And the decodable direction is causally inert (RQ3).}
+We steer the ``$=$'' residual along the fitted direction to write a counterfactual product
+$P'$, on held-out items. The full-product log-probability change brackets zero at every layer,
+equal to norm-matched random and shuffled controls (Appendix~\ref{app:steering}); this is the
+discriminative null. (The flip criterion, does the model emit $P'$, also stays zero but
+saturates, staying zero even for a reference intervention that \emph{does} move the
+log-probability, so we do not lean on it.) A dead direction could be a dead instrument, so we
+report a positive control, noting it uses a different readout and operation: patching the operand
+positions under a clean-answer recovery metric moves the output substantially (recovery $0.50$,
+attribution $\approx 2.0$), whereas the answer-site interventions do not. Even a full-residual
+swap at ``$=$'' fails to flip the answer (emit-$P' = 0$); at the late layer where it has the most
+effect it shifts the log-probability by only $+0.59$ (base).
+
+\paragraph{Certifying the illusion.}
+We decompose that swap effect into the decode direction and its orthogonal complement
+(Figure~\ref{fig:evidence}b). Ablating the decode direction still leaves $+0.50$ (base), while
+the decode direction alone contributes only $+0.08$, with non-overlapping CIs: the small
+sub-flip variance the swap moves lies almost entirely orthogonal to the decodable direction.
+(The instruct swap effect is smaller, $+0.12$, its decode-direction component not significantly
+positive; we report the decomposition for base.) This locates where the swap's weak effect
+lives, not a usable causal handle, since no intervention flips the answer: the dormant-subspace
+signature of \citet{makelov-etal-2024-subspace} made causal, the direction a probe finds is not
+the one the model uses. Consistent with \citet{stolfo-etal-2023-mechanistic} and
+\citet{nikankin-etal-2025-arithmetic}, the operands carry the signal but no sparse head set
+reconstructs it (best head $< 0.02$); the value at ``$=$'' decodes and correlates yet cannot be
+steered.

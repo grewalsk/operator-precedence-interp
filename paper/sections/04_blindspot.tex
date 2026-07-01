@@ -1,0 +1,53 @@
+\section{The Blind Spot}
+\label{sec:blindspot}
+
+\begin{table}[t]
+\centering
+\footnotesize
+\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{@{}llcc@{}}
+\toprule
+ & surface & base & instruct \\
+\midrule
+C0 & \texttt{B * C =} & 0.838 & 0.848 \\
+C4 & \texttt{( B * C ) =} & 0.890 & 0.908 \\
+C6 & \texttt{( 0 + B ) =} & 1.000 & 1.000 \\
+\textbf{C1} & \texttt{( 0 + B ) * C =} & \textbf{0.508} & \textbf{0.265} \\
+A1 & \texttt{( 0 + B ) + C =} & n/a & 0.995 \\
+D1 & \texttt{(( 0 + B )) * C =} & n/a & 0.038 \\
+\bottomrule
+\end{tabular}
+\caption{The composition blind spot (exact-match accuracy, $N{=}400$). The parts succeed
+(C4, C6) but the composition collapses (C1); $\Delta(\text{C4}{-}\text{C1}) = 0.64$, CI
+$[.60,.69]$ (instruct). A1/D1 are instruct-only. Full battery with Wilson intervals in
+Appendix~\ref{app:battery}.}
+\label{tab:battery}
+\end{table}
+
+The model evaluates every ingredient of $(\,0 + B\,) * C$ yet fails to compose them
+(Table~\ref{tab:battery}). We establish that this is a real effect, not an artifact,
+with four controls, and we state each at the precision the data support.
+
+\paragraph{It is operation-specific, not format brittleness.} Replacing the outer
+multiplication with addition, $(\,0 + B\,) + C =$, restores accuracy to $0.995$ (instruct)
+against $0.265$ under \emph{identical} format; $\Delta(\text{A1}-\text{C1}) = 0.730$, $95\%$ CI
+$[0.69, 0.77]$. It is also spacing-invariant: with all spaces removed the inside-bracket
+multiply still survives (C8 $= 0.785$ instruct, $0.765$ base) while the composition still
+collapses (C7 $= 0.19$, $0.018$), the same dissociation. So it is not generic spacing or
+parenthesis sensitivity; specifically the multiplicative composition breaks. (A1/A2 are
+instruct-only; we do not extrapolate to base.)
+
+\paragraph{It is controlled, not an artifact.} Three further controls hold. \emph{Depth} is
+a distinct stressor: a redundant nesting $(\,(\,0 + B\,)\,) * C =$ drops to $0.038$, but
+nesting degrades \emph{addition} too (nested addition $0.665$, base), so we treat depth as a
+general parsing stressor, not more composition evidence. \emph{Magnitude} is ruled out: within
+every matched-$|B\!\cdot\!C|$ bin C1 stays well below C4 ($0.53$ vs $0.96$ smallest, $0.00$ vs
+$0.70$ largest). And the collapse is an \emph{elicitation} fragility: two to four fixed-seed
+in-context examples recover C1 to the C4 ceiling (instruct $0.265 \to 0.885\,{\scriptsize[.85,.91]}
+\to 0.915\,{\scriptsize[.88,.94]}$; base $0.508 \to 0.838 \to 0.882$), so it is not an inability
+to multiply.
+
+\paragraph{Two overstatements we avoid.} The effect is neither universal (base $(\,B + 0\,) * C$
+barely moves, drop $0.015$, vs $0.33$ for $(\,0 + B\,)$; Appendix~\ref{app:wrapper}) nor
+uniformly worse under tuning (on plain parentheses instruct is \emph{better}, $0.755$ vs
+$0.495$); and C0, not $1.0$, is the reference ceiling ($B * C =$ is $0.848$ instruct).

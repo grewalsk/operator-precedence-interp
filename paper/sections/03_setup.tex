@@ -1,0 +1,27 @@
+\section{Setup and Research Questions}
+\label{sec:setup}
+
+\paragraph{Model and stimuli.}
+We study Llama-3.1-8B \citep{grattafiori-etal-2024-llama}, base and instruction-tuned, in bare
+continuation format, by greedy decoding and integer parsing. Stimuli are $N = 400$ operand pairs
+$(B, C)$ drawn once with a fixed seed from $[20, 49]$ and held constant across every condition,
+token-length matched, with spacing controlled. The central contrast is
+$\text{C1} = (\,0 + B\,) * C =$ (the composed failure) against $\text{C4} = (\,B * C\,) =$
+(multiply inside a bracket, succeeds) and $\text{C6} = (\,0 + B\,) =$ (evaluate the wrapper,
+succeeds).
+
+\paragraph{Metrics.}
+Accuracies carry Wilson intervals; paired contrasts carry paired bootstrap intervals
+(10{,}000 resamples). Decodability is five-fold cross-validated ridge $R^2$ (item-bootstrap
+interval) at a named token position. Selectivity compares the decode against a linear-$(B,C)$
+baseline (a probe given only the raw operands and Gaussian noise), so a high $R^2$ that is
+merely linear in the operands does not count as representing the product. Causal tests use
+symmetric operand counterfactuals and a full-answer log-probability metric
+$\Delta = \log p(P') - \log p(\text{true})$; because Llama chunks the leading digits, a
+first-token score is non-discriminative between two products.
+
+\paragraph{Research questions.} \textbf{RQ1}: is the composition failure a genuine, controlled
+effect or an artifact of difficulty, magnitude, or elicitation (\S\ref{sec:blindspot})?
+\textbf{RQ2}: is the near-product decodable at the answer site a \emph{represented} quantity or
+reconstructible from the operands alone (\S\ref{sec:dormant})? \textbf{RQ3}: is the decodable
+direction causally used to produce the answer (\S\ref{sec:dormant})?

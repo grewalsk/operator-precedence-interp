@@ -1,0 +1,47 @@
+\documentclass[11pt]{article}
+\usepackage[review]{acl}
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{inconsolata}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds}
+
+% colorblind-safe palette (Wong 2011), shared with figs/make_*.py
+\definecolor{cbBlue}{RGB}{0,114,178}
+\definecolor{cbOrange}{RGB}{213,94,0}
+\definecolor{cbGreen}{RGB}{0,158,115}
+\definecolor{cbGray}{RGB}{120,120,120}
+
+\newcommand{\rtwo}{$R^2$}
+\newcommand{\bc}{$B\!\cdot\!C$}
+
+\title{A Dormant Subspace, Not a Missing One: A Decodable but Causally\\ Inert Answer-Site Representation of Arithmetic in Llama-3.1-8B}
+
+\author{Anonymous ACL submission}
+
+\begin{document}
+\maketitle
+
+\input{sections/00_abstract}
+\input{sections/01_intro}
+\input{sections/02_related}
+\input{sections/03_setup}
+\input{sections/04_blindspot}
+\input{sections/05_dormant}
+\input{sections/06_generality}
+
+\bibliography{refs}
+
+\appendix
+\input{sections/08_appendix}
+
+\end{document}

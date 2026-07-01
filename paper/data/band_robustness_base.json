@@ -1,0 +1,196 @@
+{
+  "tag": "base",
+  "band2": [
+    2,
+    99
+  ],
+  "primary_band": [
+    20,
+    49
+  ],
+  "pairs_sha": "3357af098fa7a044f8e5fdb5f6e0c789855e483c",
+  "n_used": 400,
+  "acc_C0_band2": 0.6775,
+  "acc_C4_band2": 0.71,
+  "parts_floor": 0.8,
+  "in_scope_strict": false,
+  "parts_note": "band2 (2,99) is a HARDER regime: C0/C4 drop ~15-20pts vs (20,49) and sit BELOW the 0.8 parts floor. The probe doesn't strictly require behavioral competence (residuals can encode B,C even when the output is wrong), but the 'model does the parts' premise is weaker here \u2014 report as a harder regime where operand-domination still holds, not as comfortably in-scope.",
+  "gap_ci": {
+    "C1_equals": {
+      "gap_mean": 0.06779837560773314,
+      "gap_ci": [
+        0.05132433524237903,
+        0.08635099674288711
+      ],
+      "gap_excludes_zero": true,
+      "r2_real_ci": [
+        0.9192527799171792,
+        0.9416265411823531
+      ],
+      "r2_base_ci": [
+        0.8431953270269078,
+        0.8833580510801131
+      ],
+      "n_boot_used": 300
+    },
+    "C4_equals": {
+      "gap_mean": 0.09409383703748041,
+      "gap_ci": [
+        0.07745257465941399,
+        0.11275218806379671
+      ],
+      "gap_excludes_zero": true,
+      "r2_real_ci": [
+        0.9510872583483034,
+        0.9638572325128416
+      ],
+      "r2_base_ci": [
+        0.8431953270269078,
+        0.8833580510801131
+      ],
+      "n_boot_used": 300
+    }
+  },
+  "c4_minus_c1_diff_ci": {
+    "C4_minus_C1_gap_mean": 0.02629546142974728,
+    "ci": [
+      0.01969830555550939,
+      0.03366952313082351
+    ],
+    "excludes_zero": true
+  },
+  "headline_C1_equals_product": {
+    "tag": "base",
+    "band": "(2, 99)",
+    "site": "C1_equals",
+    "target": "B_times_C",
+    "layer": 7,
+    "n": 400,
+    "R2_real": 0.9220482726782799,
+    "R2_control_task": -0.03315942471674904,
+    "R2_shuffled": -0.12999548533585914,
+    "R2_linearBC_baseline": 0.8648322349617523,
+    "selectivity": 0.955207697395029,
+    "baseline_gap": 0.05721603771652761,
+    "headroom_above_baseline": 0.13516776503824768,
+    "verdict": "OPERANDS_ONLY",
+    "gap_ci": [
+      0.05132433524237903,
+      0.08635099674288711
+    ],
+    "gap_excludes_zero": true
+  },
+  "rows": [
+    {
+      "tag": "base",
+      "band": "(2, 99)",
+      "site": "C1_equals",
+      "target": "B_times_C",
+      "layer": 7,
+      "n": 400,
+      "R2_real": 0.9220482726782799,
+      "R2_control_task": -0.03315942471674904,
+      "R2_shuffled": -0.12999548533585914,
+      "R2_linearBC_baseline": 0.8648322349617523,
+      "selectivity": 0.955207697395029,
+      "baseline_gap": 0.05721603771652761,
+      "headroom_above_baseline": 0.13516776503824768,
+      "verdict": "OPERANDS_ONLY",
+      "gap_ci": [
+        0.05132433524237903,
+        0.08635099674288711
+      ],
+      "gap_excludes_zero": true
+    },
+    {
+      "tag": "base",
+      "band": "(2, 99)",
+      "site": "C1_equals",
+      "target": "B",
+      "layer": 3,
+      "n": 400,
+      "R2_real": 0.9737559398828377,
+      "R2_control_task": -0.04249303595140397,
+      "R2_shuffled": -0.15152309351908055,
+      "R2_linearBC_baseline": 0.9999190371571374,
+      "selectivity": 1.0162489758342417,
+      "baseline_gap": -0.026163097274299663,
+      "headroom_above_baseline": 8.096284286263078e-05,
+      "verdict": "OPERANDS_ONLY"
+    },
+    {
+      "tag": "base",
+      "band": "(2, 99)",
+      "site": "C1_equals",
+      "target": "C",
+      "layer": 2,
+      "n": 400,
+      "R2_real": 0.9969178298550556,
+      "R2_control_task": -0.022342320266271143,
+      "R2_shuffled": -0.10977140522811935,
+      "R2_linearBC_baseline": 0.9999243152856961,
+      "selectivity": 1.0192601501213268,
+      "baseline_gap": -0.0030064854306405264,
+      "headroom_above_baseline": 7.568471430385859e-05,
+      "verdict": "OPERANDS_ONLY"
+    },
+    {
+      "tag": "base",
+      "band": "(2, 99)",
+      "site": "C1_rparen",
+      "target": "B",
+      "layer": 3,
+      "n": 400,
+      "R2_real": 0.9973040675962834,
+      "R2_control_task": -0.06308178899477768,
+      "R2_shuffled": -0.07360210236115194,
+      "R2_linearBC_baseline": 0.9999190371571374,
+      "selectivity": 1.060385856591061,
+      "baseline_gap": -0.0026149695608539414,
+      "headroom_above_baseline": 8.096284286263078e-05,
+      "verdict": "OPERANDS_ONLY"
+    },
+    {
+      "tag": "base",
+      "band": "(2, 99)",
+      "site": "C1_rparen",
+      "target": "B_times_C",
+      "layer": 16,
+      "n": 400,
+      "R2_real": 0.37525129497904985,
+      "R2_control_task": -0.014723901716117371,
+      "R2_shuffled": -0.06818793193878037,
+      "R2_linearBC_baseline": 0.8648322349617523,
+      "selectivity": 0.3899751966951672,
+      "baseline_gap": -0.48958093998270247,
+      "headroom_above_baseline": 0.13516776503824768,
+      "verdict": "OPERANDS_ONLY"
+    },
+    {
+      "tag": "base",
+      "band": "(2, 99)",
+      "site": "C4_equals",
+      "target": "B_times_C",
+      "layer": 5,
+      "n": 400,
+      "R2_real": 0.9530860930343769,
+      "R2_control_task": -0.021514758433697656,
+      "R2_shuffled": -0.13928704635693778,
+      "R2_linearBC_baseline": 0.8648322349617523,
+      "selectivity": 0.9746008514680745,
+      "baseline_gap": 0.08825385807262454,
+      "headroom_above_baseline": 0.13516776503824768,
+      "verdict": "OPERANDS_ONLY",
+      "gap_ci": [
+        0.07745257465941399,
+        0.11275218806379671
+      ],
+      "gap_excludes_zero": true
+    }
+  ],
+  "ridge": 1.0,
+  "folds": 5,
+  "seed": 919,
+  "gap_nboot": 300,
+  "note": "Band-robustness panel. band2 linear-(B,C) ceiling \u22480.85 (vs \u22480.97 at (20,49)) -> \u22480.15 headroom. The DECISION is the gap CI (gap=R2_real-baseline): brackets 0 -> operand-explained (no detectable product even with headroom); excludes 0 -> a small REAL product component (then the claim shifts from 'not represented' to 'weakly represented but causally dormant', leaning on the causal null). The fixed 0.10 'verdict' margin is a heuristic, NOT the test."
+}

@@ -1,0 +1,21 @@
+\begin{abstract}
+Large language models often fail at arithmetic composition even when they solve
+every part in isolation. We study a token-matched instance in Llama-3.1-8B:
+wrapping a multiplicative operand in an additive identity, $(\,0 + B\,) * C$,
+collapses multiplication accuracy (instruct $0.27$, base $0.51$) although the model
+evaluates the wrapped sub-expression perfectly ($1.00$) and multiplies inside a
+bracket ($0.91$). The failure is operation-specific (the additive analogue composes
+at $0.99$), depth-sensitive, magnitude-controlled, and recovers with a few in-context
+examples. We then ask what the internal representation looks like. At the answer
+position the operand $B$ and the near-product \bc{} are linearly decodable
+($R^2 \approx 0.96$), which invites a ``the value is there but unused'' story. We
+show this reading is an interpretability illusion. The decode is operand-dominated:
+it has no margin over a linear-$(B,C)$ baseline where there is no headroom, and only a
+small margin (gap $\approx 0.06$, CI excludes zero) where there is. More decisively,
+the decodable direction is causally inert: steering along it does not change the
+output, and a full-residual swap at the answer position does not flip it either, while
+patching the operand positions does move it (recovery $0.50$), a dead site, not a dead
+probe. Decodability at the answer site is not evidence of computation there. The collapse
+replicates across model families in matched format, with a prompt-format confound we make
+explicit.
+\end{abstract}

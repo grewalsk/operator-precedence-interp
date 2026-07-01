@@ -1,0 +1,5 @@
+tag,model,format,C0,C1,C4,C6,A1,D1,fs_C1_4,label
+instruct,meta-llama/Llama-3.1-8B-Instruct,chat-wrapped,0.775,0.3075,0.7,1,0.975,0.0725,0.3625,"OUT_OF_SCOPE (can't even do C4/C6 — capability, not composition)"
+llama32_3b_it,meta-llama/Llama-3.2-3B-Instruct,chat-wrapped,0.7725,0.64,0.74,1,0.655,0.4975,0.0975,"OUT_OF_SCOPE (can't even do C4/C6 — capability, not composition)"
+qwen25_7b_it,Qwen/Qwen2.5-7B-Instruct,chat-wrapped,0.7525,0.07,0.74,0.0275,0.64,0.0325,0.15,"OUT_OF_SCOPE (can't even do C4/C6 — capability, not composition)"
+gemma2_9b_it,google/gemma-2-9b-it,chat-wrapped,0.9925,0.9475,0.9875,1,1,0.8925,0.985,DOES_NOT_REPLICATE
