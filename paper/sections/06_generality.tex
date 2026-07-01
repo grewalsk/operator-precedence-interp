@@ -5,10 +5,10 @@
 In matched bare format the collapse is not specific to Llama-3.1-8B. Among models that clear a
 parts floor (C4, C6 $\geq 0.80$), the composed form collapses for Gemma-2-9b-it (C1 $= 0.043$,
 C4 $= 0.99$) and Llama-3.2-3B (C1 $= 0.36$), alongside base and instruct Llama-3.1-8B; three
-others (Qwen2.5-7B, Mistral-7B, Llama-3.2-1B) fail the parts in bare format and are out of
-scope, not counterexamples (we name rather than drop them). Chat formatting changes this, not
-cleanly: Gemma-2-9b-it \emph{composes} in its native chat template (C1 $= 0.95$), which would
-look like a family dissociation, but there Llama-3.1-8B falls below the parts floor (C4 $= 0.70$)
+others fail the parts in bare format and are out of scope, not counterexamples
+(Appendix~\ref{app:crossmodel}). Chat formatting changes this, not
+cleanly: Gemma-2-9b-it \emph{composes} in its native chat template (C1 $= 0.95$), but there
+Llama-3.1-8B falls below the parts floor (C4 $= 0.70$)
 and leaves scope, so the composing and failing models are never compared in the same format. We
 read this as replication in matched bare format plus a prompt-format confound, \emph{not} as
 evidence that some families are immune; per-model native-format evaluation is the right axis for
@@ -17,15 +17,11 @@ a clean cross-family claim, which we do not make.
 \paragraph{Limitations.}
 The causal localization is distributed (operand positions matter but no sparse circuit is
 recovered), so we characterize \emph{where}, not a minimal mechanism; the operation and depth
-controls (A1, A2, D1) are instruct-only; and the zero-excluding gap is small and only in the
-harder band, with the dormancy resting on the causal-share certification. None of these affects
-the central result.
+controls are instruct-only; and the zero-excluding gap is small and only in the harder band, with
+the dormancy resting on the causal-share certification. None of these affects the central result.
 
 \paragraph{Conclusion.}
 A parenthesized additive identity selectively breaks multiplicative composition in Llama-3.1-8B,
-and the tempting reading that the product is represented at the answer site but unused is an
-interpretability illusion: the decodable answer-site subspace is operand-dominated and causally
-inert, while the answer is re-derived diffusely from the operands. The portable lesson is that a
-high decodability $R^2$ needs a baseline and a causal control before it can support any claim
-about what a model computes; we release code, data, and the controls so the null and its
-positive control can be checked.
+and the ``represented but unused'' reading of the decodable answer site is an illusion: it is
+operand-dominated and causally inert, so a high decodability $R^2$ needs a baseline and a causal
+control before it licenses a mechanistic claim.

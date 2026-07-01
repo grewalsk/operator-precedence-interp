@@ -27,13 +27,12 @@ few-shot-recoverable, each with a confidence interval (\S\ref{sec:blindspot}).
 \item Evidence that the decodable answer-site subspace is \emph{operand-dominated}:
 it has no margin over a linear-$(B,C)$ baseline where the band leaves no headroom, and
 only a small margin (gap $\approx 0.06$, CI excludes zero) where it does, robust to a
-pre-registered probe layer (\S\ref{sec:dormant}).
+C1-independent probe-layer choice (\S\ref{sec:dormant}).
 \item A causal test showing the decodable direction is \emph{inert}: probe-direction
 steering and a full-residual swap at the answer position both leave the output unchanged,
-anchored by a positive control (the same-family patching moves the answer at the operand
-positions, recovery $0.50$), so the null is a dead site, not a dead probe. Within the swap's
-small sub-flip effect, $\approx 85\%$ of the variance is orthogonal to the decode direction
-(\S\ref{sec:dormant}).
+anchored by a positive control (patching the operand positions moves the answer, recovery
+$0.50$), so the null is a dead site, not a dead probe. Ablating the decode direction preserves
+$\approx 85\%$ of the swap's (sub-flip) answer-effect (\S\ref{sec:dormant}).
 \item A cross-family replication in matched bare format, together with an explicit
 prompt-format confound that we argue precludes reading the cross-model results as a
 clean family dissociation (\S\ref{sec:generality}).

@@ -113,7 +113,7 @@ def site_panel(ax):
 
 
 def main():
-    fig, (axL, axM, axR) = plt.subplots(1, 3, figsize=(8.6, 1.5))
+    fig, (axL, axM, axR) = plt.subplots(1, 3, figsize=(8.8, 1.38))
     selectivity_panel(axL)
     causal_panel(axM)
     site_panel(axR)

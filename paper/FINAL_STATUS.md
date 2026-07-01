@@ -52,6 +52,51 @@ answer-carrying site, reported in the same emit-P'/logprob units as the C1 null 
 it in Figure 2. This converts residual 1 from "disclosed caveat" to "closed," and is the single
 change most likely to move the paper from weak-accept to accept.
 
+## Round 2 — external mech-interp review (applied)
+
+A second independent read-only reviewer (theory-vs-data audit + MathNLP venue fit) was run. All
+writing/hygiene findings are now applied:
+- **Desk-reject risk fixed:** the body genuinely spilled ~2 lines onto page 5 (the earlier check
+  matched a mid-conclusion phrase, not the last line). The full body, through the conclusion, now
+  ends on page 4; page 5 begins with the References heading (verified with column-aware extraction).
+- **§5 causal-null sentence rewritten** (the most attackable): the first-token null (vs
+  random/shuffled, non-discriminative) and the full-product dose-response are now correctly
+  separated and attributed. The same-axis dose-response is promoted from an anonymous parenthetical
+  to the discriminative control: C1 inject flat at every dose, C4 inject rises +0.08 -> +0.46 (CIs
+  exclude 0) yet never flips. This narrows the positive-control residual for base using committed
+  data.
+- **Swap surface named** (C4 `=`) in §5 and the Fig 2b caption; the swap magnitude corrected to
+  "+0.59 at L19 where we decompose it, peak +0.66 at L23."
+- **"pre-registered" -> "C1-independent criterion (C4 decode peak)"** (§5 + contribution bullet);
+  "85% of the variance" -> "85% of the swap's answer-effect" (effect share, with the 20% geometric
+  magnitude share noted); Makelov "dormant" given a one-clause strong-sense definition.
+- **Honesty/precision:** band-2 product reading hedged to "operand-nonlinear component, weak
+  product signal"; B-at-`=` decode scoped to 0.96-0.97; nesting control moved to within-instruct
+  (0.25 from 0.99); wrapper-heatmap position-dependence scoped to base; n_boot=300 for gap CIs
+  noted in §3.
+- **Repo hygiene:** DATA.md now flags the stale `inject_C1_L4=+1.99` cross-surface-bug artifact so
+  a repo-reading reviewer is not misled; stale `sections/07_conclusion.tex` deleted.
+
+## GPU runs to do later (deferred; not run here)
+
+In priority order (from the reviewer's "run before submission"):
+1. **Same-metric answer-site positive control (highest value, ~+10pp odds).** Re-score the
+   operand-position patch (and/or a donor swap at an answer-carrying site) in the SAME
+   emit-P'/full-product-logprob units as the C1 null, so the null and its positive control sit in
+   identical units on Fig 2c. Reuses the 82r machinery. This converts residual 1 from "disclosed
+   caveat" to "closed," and rescues instruct (whose dose reference is weak). One GPU pass.
+2. **One second wrapper family (~+5pp odds).** Run `( 1 * B ) * C` (base mul 0.60 behaviorally)
+   through the mechanistic pipeline (selectivity gap + dose null at `=`), to show the dormant
+   answer site is not an additive-identity idiosyncrasy. Cheap; pre-empts "is this one weird
+   prompt?"
+3. **Optional stretch:** re-run the fixed 82s static Makelov certification (all-answer-token
+   basis) as an appendix strengthener; commit base A1/A2/D1 to drop the instruct-only caveat
+   (behavioral, cheap); a richer nonlinear baseline (B^2, C^2, B+C features) for the band-2 gap to
+   sharpen "product" vs "any nonlinearity."
+
+After run 1, update Fig 2c and the §5 positive-control sentence; after run 2, add a one-row
+robustness panel. Everything else in the paper is submission-ready.
+
 ## Artifacts
 - `paper.pdf` (compiled), `main.tex` + `sections/*.tex`, `refs.bib`, `build.sh`
 - `figs/make_*.py` (reproducible from `paper/data/*`, itself staged from committed `origin/main`)

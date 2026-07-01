@@ -98,6 +98,13 @@ positive control, because the GT-first-token-logit metric is non-discriminative 
 digits; first token shared across products). This is why WO#5 was INCONCLUSIVE. Do NOT cite c4_ref as a
 working positive control.
 
+### REPO HAZARD (not a paper number) — stale `inject_C1_L4` cell
+`causal_steering_fullproduct_{base,instruct}.json` contains a cell `inject_C1_L4` = +1.99 [1.71,2.28].
+This is NOT "steering works": it is a KNOWN cross-surface-baseline BUG (a C1-prompt score compared
+against a C4-prompt clean baseline), documented in `cells/82x_wo_dose_response.py` and SUPERSEDED by
+the within-surface `dose_response_*.json` (C1 flat at every dose). Do not cite it; the file's own
+verdict is SITE_OR_METRIC_STILL_BROKEN. Flagged here so a repo-reading reviewer isn't misled.
+
 ### Full-product metric re-score — `causal_steering_fullproduct_*.json`, `causal_steering_lateswap_*.json`
 - **Full-residual SWAP at `=` does NOT flip the output**: emit-P' = **0.0** at every late layer
   (lateswap PRODUCT_NOT_AT_EQUALS); swap logprobΔ(P'-true) = **-0.20 (base) / -0.001 (instruct)**. [C]
