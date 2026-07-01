@@ -77,6 +77,20 @@ writing/hygiene findings are now applied:
 - **Repo hygiene:** DATA.md now flags the stale `inject_C1_L4=+1.99` cross-surface-bug artifact so
   a repo-reading reviewer is not misled; stale `sections/07_conclusion.tex` deleted.
 
+## Round-2 re-check defects (S1-S6): disposition
+
+- S1 (output vs emitted answer) — APPLIED: abstract, intro bullet 3, and Fig 1 now say "emitted
+  answer" / "answer", consistent with the C4 log-probability movement in §5.
+- S2 (circular §5 grammar) — APPLIED: "the swap moves only ~20% of its magnitude along it."
+- S3 (stale appendix caption) — APPLIED: figA_steering now points to "the dose-response (§5) and
+  Figure 2b."
+- S4 (repo-only) — APPLIED: DATA.md explains the `WEAK_INSTRUMENT` label's flip-level threshold so
+  a repo reader does not quote it as "instrument dead."
+- S5 (availability statement, removed by the page cut) — DEFERRED to camera-ready. An anonymous
+  MathNLP submission cannot carry the (deanonymizing) repo link anyway; restore the "code and data
+  released" line at camera-ready when the page count relaxes.
+- S6 (Fig 1 wording) — APPLIED alongside S1.
+
 ## GPU runs to do later (deferred; not run here)
 
 In priority order (from the reviewer's "run before submission"):

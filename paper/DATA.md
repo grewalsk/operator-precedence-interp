@@ -112,6 +112,11 @@ verdict is SITE_OR_METRIC_STILL_BROKEN. Flagged here so a repo-reading reviewer 
 - Inject dose-response (82x, `dose_response_*.json`, full-product metric): C1 inject flat at k in {1,2,4,8}
   (CIs bracket 0); C4 reference base rises monotonically +0.083 -> +0.464 (every CI excludes 0) but stays
   sub-threshold and never flips (emit=0); instruct near-flat. => a WEAK continuous handle at C4, none at C1. [C]
+  REPO NOTE: `dose_response_*.json` carries an internal verdict label WEAK_INSTRUMENT. That label is
+  thresholded on FLIP-LEVEL range (it requires the C4 reference to cross a 0.5-emit / recover_thr bar), which
+  it does not; it does NOT mean the axis is inert. The paper correctly reads the LOGPROB panel (the C4
+  reference moves monotonically with a CI excluding 0), because emit-P' saturates at 0. Do not quote the
+  one-word label as "the instrument is dead."
 
 ### Causal-share Makelov certification — `causal_share_*.json` (82y)
 Full swap at `=` (L19): logprobΔ full **+0.593** [0.513,0.673] (base); ablating the decode direction (perp)
