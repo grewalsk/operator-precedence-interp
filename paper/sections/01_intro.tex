@@ -1,11 +1,12 @@
 \section{Introduction}
 
-Language models solve many arithmetic problems yet fail on superficially trivial
-variants. A recurring explanation is that some intermediate value is computed but not
-propagated, tested by probing the residual stream: if the value decodes, the model
-``knows'' it. We show this inference is unsafe. A decodable value at the answer position
-can be an operand-reconstructible, causally inert shadow of the computation, not the
-computation itself.
+When does a decodable representation license a claim about computation? Probing the
+residual stream is a standard route to mechanistic claims: if an intermediate value
+decodes, the model is said to ``know'' it, and when a downstream failure co-occurs with a
+present-but-decodable value, that value is called computed-but-unused. We show this
+inference is unsafe, using arithmetic composition as a controlled testbed. A value that
+decodes at the answer position can be an operand-reconstructible, causally inert shadow of
+the computation, not the computation itself.
 
 Our vehicle is a single controlled failure. For $B, C \in [20,49]$, wrapping the first operand
 in an additive identity, $(\,0 + B\,) * C =$, collapses accuracy to $0.27$ (instruct) / $0.51$

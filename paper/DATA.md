@@ -108,6 +108,13 @@ verdict is SITE_OR_METRIC_STILL_BROKEN. Flagged here so a repo-reading reviewer 
 ### Full-product metric re-score — `causal_steering_fullproduct_*.json`, `causal_steering_lateswap_*.json`
 - **Full-residual SWAP at `=` does NOT flip the output**: emit-P' = **0.0** at every late layer
   (lateswap PRODUCT_NOT_AT_EQUALS); swap logprobΔ(P'-true) = **-0.20 (base) / -0.001 (instruct)**. [C]
+- **emit_true after the C4 `=` swap (WO#8 C1, `causal_steering_lateswap_*.json`)**: the model still
+  emits its OWN correct answer at **0.90-0.93 (base) / 0.92-0.95 (instruct)** at every late layer
+  L19-L31 (emit-P'=0 throughout). => the answer site is demonstrably BYPASSED. [C]
+- **Headroom (WO#8 B1, derived from committed baseline R^2)**: band (20,49) baseline R^2=0.9679 =>
+  headroom 1-0.9679 = **0.032** (gap test near-vacuous); band (2,99) baseline R^2=0.8648 => headroom
+  **0.135**, inside which the gap 0.051-0.086 (base)/0.043-0.079 (instruct) lies. Prop. 1 bound:
+  gap <= 1 - R^2_baseline. [D]
   >>> THE WORK ORDER'S "a full-residual swap flips it" IS REFUTED. See OPEN_ITEMS.md. <<<
 - Inject dose-response (82x, `dose_response_*.json`, full-product metric): C1 inject flat at k in {1,2,4,8}
   (CIs bracket 0); C4 reference base rises monotonically +0.083 -> +0.464 (every CI excludes 0) but stays

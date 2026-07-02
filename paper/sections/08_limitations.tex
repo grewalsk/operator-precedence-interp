@@ -1,0 +1,27 @@
+\section*{Limitations}
+
+Our mechanistic claims are established on one model family (Llama-3.1-8B, base and instruct); the
+cross-model results (\S\ref{sec:generality}) are behavioral replication in matched format, not
+mechanistic transfer, and we deliberately make no cross-family dissociation claim. The causal
+localization is distributed: the operand positions carry the answer-relevant signal but no sparse
+head set reconstructs it, so we characterize \emph{where} the computation lives, not a minimal
+circuit. The selectivity gap that excludes zero is small and appears only at the wider band
+$[2,99]$, which is a harder regime where the parts themselves fall below our $0.80$ floor
+(C4 $= 0.71$/$0.73$); we therefore read it as a stress test of operand-domination and rest the
+headline on the band-independent causal null, with the dormancy certified by the causal-share
+decomposition rather than the static gap. The operation and depth controls (A1, A2, D1) are
+committed for the instruct model only, and the C4 dose reference is base-scoped: on instruct the
+same-axis reference is weak (a single dose crosses, non-monotone), so the dynamic-range argument
+for instruct rests on the operand-route positive control rather than the answer-site dose curve.
+That positive control is a clean-answer recovery metric at the operand positions, a different
+readout and operation than the answer-site full-product swap; a same-metric answer-site positive
+control is the natural next experiment (its notebook is included in the released code), as is a
+second wrapper family beyond the additive identity. Finally, the linear-$(B,C)$ baseline's span
+excludes $B^2$, $C^2$, and $B\!\cdot\!C$, so the gap upper-bounds operand-nonlinear structure and
+is consistent with, but does not by itself identify, a product component; a quadratic-feature
+baseline is the decisive follow-up.
+
+\paragraph{Availability.} Code, data, figure scripts, and every control (including the two
+next-experiment notebooks above) are released at an anonymized mirror,
+\url{https://anonymous.4open.science/r/operator-precedence-anon}, with each reported number mapped
+to its source file.

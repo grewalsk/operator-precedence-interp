@@ -1,34 +1,49 @@
 \section{Related Work}
 \label{sec:related}
 
-\paragraph{Surface form and mathematical brittleness.}
-Model math accuracy is sensitive to surface structure that leaves the answer invariant.
-\citet{williamson-etal-2025-syntactic}, at the same venue, characterize a behavioral blind spot
-in natural-language word problems where failure tracks dependency-locality complexity and
-recovers under structure-lowering rephrasing, and conjecture a coupling between surface form and
-internal representation. Our instance is orthogonal on both axes and \emph{tests} that
-conjecture: a token-matched \emph{symbolic} expression whose additive-identity wrapper carries no
-dependency-locality cost, for which we show the obvious representational reading (a
-computed-but-unused product at the answer site) does not hold; the internal signature is a
-dormant, operand-explained subspace, not a missing representation. \citet{reusch-lehner-2022-extracting}
-show operator-tree structure is decodable from embeddings; we show that answer-site decodability
-of the arithmetic \emph{value} can be an operand-reconstructible artifact that is causally inert,
-so decodability of arithmetic structure does not certify its use.
+\paragraph{Probing validity and causal probing.}
+A linear probe measures correlation, not use: a probe can fit a random control task
+\citep{hewitt-liang-2019-designing}, and decodability alone licenses no functional claim
+\citep{belinkov-2022-probing}. The information-theoretic view sharpens this: probing recovers
+information already present in the inputs \citep{pimentel-etal-2020-information}, and description
+length, not accuracy, measures how \emph{extractable} it is \citep{voita-titov-2020-information}.
+This is exactly the objection our selectivity test answers: \bc{} is nearly linear in $(B,C)$
+on-distribution, so a probe recovers it whether or not the product is represented; the
+linear-$(B,C)$ baseline quantifies that inherited decodability and the gap over it is what remains
+(\S\ref{sec:dormant}, Prop.~\ref{prop:headroom}). Causal probing goes further by intervening:
+amnesic probing removes a property and reads the behavioral effect
+\citep{elazar-etal-2021-amnesic}, and concept-erasure methods formalize removing a linear subspace
+\citep{ravfogel-etal-2020-null, belrose-etal-2023-leace}; our orthogonal-complement (perp)
+intervention is in that lineage, but applied as a single ridge direction inside a full-residual
+donor swap at one site, scored by a full-product metric over a dose grid. The failure mode we
+document is the interpretability illusion of \citet{bolukbasi-etal-2021-illusion} and, for subspace
+activation patching specifically, \citet{makelov-etal-2024-subspace}: a direction can carry a
+decodable signal yet be causally disconnected from the output. We adopt activation-patching best
+practice throughout \citep{zhang-nanda-2024-towards, heimersheim-nanda-2024-use} and read our
+interchange intervention through causal abstraction \citep{geiger-etal-2021-causal}
+(\S\ref{sec:dormant}).
 
-\paragraph{Decodability versus causal use.}
-A linear probe measures correlation, not use \citep{belinkov-2022-probing}, and can succeed on
-random labels without a control \citep{hewitt-liang-2019-designing}. The sharpest form is the
-subspace-patching illusion of \citet{makelov-etal-2024-subspace}: a direction can carry a
-decodable signal yet be causally disconnected from the output. Our result is an arithmetic
-instance of this illusion, established with a baseline and a steering test rather than assumed.
-\citet{matsumoto-etal-2022-tracing} find decoded intermediate values in neural math solvers to
-be causally usable; we find a decodable answer-site subspace that is causally inert. The results
-are compatible: whether a decodable value is used is a per-site empirical question.
+\paragraph{Arithmetic and number representations.}
+How language models compute arithmetic is increasingly well mapped. Numbers are encoded as
+structured directions \citep{wallace-etal-2019-nlp}; addition is implemented with Fourier features
+\citep{zhou-etal-2024-fourier} and trigonometric identities \citep{kantamneni-tegmark-2025-trigonometry},
+and small models grok modular addition into a clean circuit \citep{nanda-etal-2023-progress,
+quirke-barez-2024-understanding}. In large models \citet{stolfo-etal-2023-mechanistic} trace
+arithmetic from operand tokens to the final position through late modules, and
+\citet{nikankin-etal-2025-arithmetic} argue the computation is a diffuse ``bag of heuristics''
+rather than an algorithm. Our result adds a representational corollary to the bag-of-heuristics
+picture: the decodable near-answer at the ``$=$'' position is an operand echo, not a stored
+intermediate; the answer is assembled from the operand positions at readout, so a value that
+decodes at ``$=$'' need not be computed there.
 
-\paragraph{Mechanisms of arithmetic.}
-\citet{stolfo-etal-2023-mechanistic} trace arithmetic from operand tokens to the final position
-through late modules, and \citet{nikankin-etal-2025-arithmetic} argue models use a diffuse ``bag
-of heuristics.'' Our localization agrees, and adds that the decodable answer-site value, easily
-mistaken for the computed result, is a byproduct of that operand information. For method we
-follow patching best practice \citep{zhang-nanda-2024-towards, heimersheim-nanda-2024-use}:
-symmetric counterfactuals, a full-answer log-probability metric, and a positive control per null.
+\paragraph{Elicitation and format sensitivity.}
+Model accuracy is sensitive to surface form that leaves the answer invariant
+\citep{sclar-etal-2024-quantifying}, and mathematical errors in particular track surface structure
+and recover under rephrasing \citep{williamson-etal-2025-syntactic, reusch-lehner-2022-extracting}.
+That our zero-shot collapse recovers with a few in-context examples is consistent with
+demonstrations acting largely through format and priors rather than content
+\citep{min-etal-2022-rethinking}; we treat the recovery as a control on the behavioral phenomenon,
+not as our contribution, and locate the mechanism question in the zero-shot regime. Closest to us,
+\citet{matsumoto-etal-2022-tracing} find decoded intermediate values in neural math solvers to be
+causally usable; we find a decodable answer-site subspace that is causally inert, so whether a
+decodable value is used is a per-site empirical question.

@@ -112,12 +112,42 @@ def site_panel(ax):
                 arrowprops=dict(arrowstyle="->", color=GRAY, lw=0.6))
 
 
+def dose_panel(ax):
+    """Same-axis inject dose-response (full-product logprob delta vs dose k). C1 flat at every
+    dose (CIs bracket 0); C4 rises monotonically (base) yet never flips (emit-P'=0 throughout).
+    Instruct C4 shown too and is weak/non-monotone (kept honest by the in-text hedge)."""
+    db = load_json("dose_response_base.json"); di = load_json("dose_response_instruct.json")
+    K = db["k_grid"]
+    def series(d, which):
+        cells = d[which]
+        m = [cells[f"k{k}"]["mean_delta"] for k in K]
+        lo = [cells[f"k{k}"]["mean_delta"] - cells[f"k{k}"]["ci"][0] for k in K]
+        hi = [cells[f"k{k}"]["ci"][1] - cells[f"k{k}"]["mean_delta"] for k in K]
+        return m, [lo, hi]
+    c4b_m, c4b_e = series(db, "ref_dose")
+    c1b_m, c1b_e = series(db, "claim_dose")
+    c4i_m, _ = series(di, "ref_dose")
+    ax.errorbar(K, c4b_m, yerr=c4b_e, marker="o", ms=3, lw=1.3, color=BLUE, capsize=2,
+                label="C4 ref (base)")
+    ax.errorbar(K, c1b_m, yerr=c1b_e, marker="s", ms=3, lw=1.3, color=ORANGE, capsize=2,
+                label="C1 claim (base)")
+    ax.plot(K, c4i_m, marker="^", ms=3, lw=0.9, color=GRAY, ls="--", label="C4 ref (instruct)")
+    ax.axhline(0, color=GRAY, lw=0.7)
+    ax.set_xscale("log", base=2); ax.set_xticks(K)
+    ax.get_xaxis().set_major_formatter(plt.matplotlib.ticker.FixedFormatter([str(k) for k in K]))
+    ax.set_xlabel(r"inject dose $k$")
+    ax.set_ylabel(r"logprob $\Delta(P'\!-\!\mathrm{true})$")
+    ax.set_title("(d) Dose-response (emit-$P'\\!=\\!0$ throughout)")
+    ax.legend(loc="upper left", frameon=False, fontsize=6)
+
+
 def main():
-    fig, (axL, axM, axR) = plt.subplots(1, 3, figsize=(8.8, 1.38))
-    selectivity_panel(axL)
-    causal_panel(axM)
-    site_panel(axR)
-    fig.tight_layout(w_pad=1.3)
+    fig, axes = plt.subplots(2, 2, figsize=(6.9, 3.4))
+    selectivity_panel(axes[0, 0])
+    causal_panel(axes[0, 1])
+    site_panel(axes[1, 0])
+    dose_panel(axes[1, 1])
+    fig.tight_layout(w_pad=1.6, h_pad=1.8)
     save(fig, "fig2_evidence.pdf")
 
 
